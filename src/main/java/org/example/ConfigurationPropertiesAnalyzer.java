@@ -220,6 +220,29 @@ public class ConfigurationPropertiesAnalyzer {
                             fieldInfo.newFieldName = FieldInfo.toFieldName(newPropertyName);
                             fieldInfo.needsRename = !fieldInfo.fieldName.equals(fieldInfo.newFieldName);
                         }
+                    } else if (fieldInfo.isCollection) {
+                        // Check for indexed property mappings (e.g., identity.adapters[0].appId)
+                        String indexedPropertyPattern = prefix + "\\." + propertyName + "\\[\\d+\\]\\..*";
+                        for (Map.Entry<String, String> entry : mappings.entrySet()) {
+                            if (entry.getKey().matches(indexedPropertyPattern)) {
+                                // Found an indexed property mapping for this collection field
+                                String oldKey = entry.getKey();
+                                String newKey = entry.getValue();
+
+                                // Extract the collection field name from both keys
+                                String oldCollectionField = extractCollectionFieldFromIndexedProperty(oldKey, prefix);
+                                String newCollectionField = extractCollectionFieldFromIndexedProperty(newKey,
+                                    result.newPrefix != null ? result.newPrefix : prefix);
+
+                                if (oldCollectionField != null && newCollectionField != null &&
+                                    !oldCollectionField.equals(newCollectionField)) {
+                                    fieldInfo.newFieldName = FieldInfo.toFieldName(newCollectionField);
+                                    fieldInfo.needsRename = !fieldInfo.fieldName.equals(fieldInfo.newFieldName);
+                                    fieldInfo.fullPropertyPath = oldKey; // Store for reference
+                                }
+                                break; // Found a mapping for this field
+                            }
+                        }
                     }
 
                     result.fields.add(fieldInfo);
@@ -320,24 +343,32 @@ public class ConfigurationPropertiesAnalyzer {
     }
 
     /**
-     * Determine the new prefix by comparing old and new property structures.
-     *
-     * Logic:
-     * 1. Split both properties by '.'
-     * 2. If the number of parts match, extract the same number of parts as the old prefix from the new property
-     * 3. If the number of parts differ:
-     *    - Remove the old prefix from the old property
-     *    - Count the remaining parts in the old property (after prefix removal)
-     *    - Remove that many parts from the end of the new property
-     *    - The remaining parts form the new prefix
-     *
-     * Example: identity.enabled -> identity.provider.enabled
-     *   - Old prefix: "identity" (1 part)
-     *   - Old property: "identity.enabled" (2 parts)
-     *   - After removing prefix: "enabled" (1 part remaining)
-     *   - New property: "identity.provider.enabled" (3 parts)
-     *   - Remove 1 part from end: "identity.provider" (new prefix)
+     * Extract collection field name from indexed property notation.
+     * E.g., "identity.adapters[0].appId" with prefix "identity" -> "adapters"
+     *       "identiti.adapter[0].appIds" with prefix "identiti" -> "adapter"
      */
+    private String extractCollectionFieldFromIndexedProperty(String propertyKey, String prefix) {
+        if (propertyKey == null || prefix == null) {
+            return null;
+        }
+
+        // Remove the prefix and leading dot
+        String withoutPrefix = propertyKey;
+        if (propertyKey.startsWith(prefix + ".")) {
+            withoutPrefix = propertyKey.substring(prefix.length() + 1);
+        }
+
+        // Extract the part before [index]
+        Pattern collectionPattern = Pattern.compile("^([\\w-]+)\\[\\d+\\]");
+        Matcher matcher = collectionPattern.matcher(withoutPrefix);
+
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+
+        return null;
+    }
+
     private String determineNewPrefix(String oldProperty, String newProperty, String oldPrefix) {
         String[] oldParts = oldProperty.split("\\.");
         String[] newParts = newProperty.split("\\.");
@@ -382,9 +413,6 @@ public class ConfigurationPropertiesAnalyzer {
         return newParts[0];
     }
 
-    /**
-     * Apply changes to the file based on analysis results
-     */
     public void applyChanges(AnalysisResult analysis) {
         if (analysis == null) {
             return;
@@ -421,9 +449,6 @@ public class ConfigurationPropertiesAnalyzer {
         }
     }
 
-    /**
-     * Rename a field throughout the class including getters and setters
-     */
     private String renameFieldInClass(String content, FieldInfo field) {
         String result = content;
 
