@@ -257,10 +257,6 @@ public class ConfigurationPropertiesAnalyzer {
         }
     }
 
-    /**
-     * Analyze a file that is a nested configuration class (not annotated with @ConfigurationProperties)
-     * This handles cases like IdentityAdapterDefinition where fields are mapped via indexed properties.
-     */
     public AnalysisResult analyzeNestedConfigClass(String filePath, Map<String, String> mappings) {
         try {
             String content = readFileContent(new File(filePath));
@@ -275,6 +271,40 @@ public class ConfigurationPropertiesAnalyzer {
             String className = classMatcher.group(1);
             int classLineNumber = calculateLineNumber(content, classMatcher.start());
 
+            // Check if this class is likely a nested configuration class referenced in indexed properties
+            // Strategy: Extract collection field names from indexed properties and see if class name relates
+            boolean hasRelevantMappings = false;
+
+            for (Map.Entry<String, String> mapping : mappings.entrySet()) {
+                String oldKey = mapping.getKey();
+
+                // Check if this is an indexed property mapping
+                if (oldKey.matches(".*\\[\\d+\\]\\.\\w+")) {
+                    // Extract the collection field name (e.g., "adapters" from "identity.adapters[0].appId")
+                    Pattern collectionPattern = Pattern.compile("\\.(\\w+)\\[\\d+\\]\\.");
+                    Matcher m = collectionPattern.matcher(oldKey);
+
+                    if (m.find()) {
+                        String collectionFieldName = m.group(1); // e.g., "adapters"
+
+                        // Check if class name is related to the collection field
+                        // Examples: "adapters" -> "Adapter" or "IdentityAdapterDefinition"
+                        // We look for the singular form of the collection name in the class name
+                        String singular = collectionFieldName.replaceAll("s$", ""); // simple plural -> singular
+
+                        if (className.toLowerCase().contains(singular.toLowerCase())) {
+                            hasRelevantMappings = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!hasRelevantMappings) {
+                // This class doesn't seem to be the nested type for any indexed property
+                return null;
+            }
+
             // Create a pseudo analysis result (no prefix for nested classes)
             AnalysisResult result = new AnalysisResult(filePath, "", className, classLineNumber);
 
@@ -287,8 +317,7 @@ public class ConfigurationPropertiesAnalyzer {
 
                 FieldInfo fieldInfo = new FieldInfo(fieldName, fieldType, lineNumber);
 
-                // Check mappings for indexed properties like identity.adapters[0].appId
-                // We need to find mappings that end with the field name
+                // Check mappings for indexed properties
                 for (Map.Entry<String, String> mapping : mappings.entrySet()) {
                     String oldKey = mapping.getKey();
                     String newKey = mapping.getValue();
@@ -453,38 +482,78 @@ public class ConfigurationPropertiesAnalyzer {
         String result = content;
 
         // 1. Rename field declaration
-        // Match: private Type fieldName;
-        String fieldPattern = "\\bprivate\\s+" + Pattern.quote(field.fieldType) +
-                            "\\s+" + Pattern.quote(field.fieldName) + "\\s*(?:=.*)?;";
-        String fieldReplacement = "private " + field.fieldType + " " + field.newFieldName + ";";
+        // Match: private Type fieldName; or private Type fieldName = value;
+        String fieldPattern = "(\\bprivate\\s+" + Pattern.quote(field.fieldType) +
+                            "\\s+)" + Pattern.quote(field.fieldName) + "(\\s*(?:=.*)?;)";
+        String fieldReplacement = "$1" + field.newFieldName + "$2";
         result = result.replaceAll(fieldPattern, fieldReplacement);
 
-        // 2. Rename field usages (this.fieldName or just fieldName)
-        // Use word boundaries to avoid partial matches
-        String usagePattern = "\\b(?:this\\.)?(" + Pattern.quote(field.fieldName) + ")\\b";
-        result = result.replaceAll(usagePattern, field.newFieldName);
-
-        // 3. Rename getters: getFieldName() -> getNewFieldName()
+        // 2. Rename getters and setters (method names only, not parameters)
         String capitalizedOld = capitalize(field.fieldName);
         String capitalizedNew = capitalize(field.newFieldName);
 
-        String getterPattern = "\\bget" + Pattern.quote(capitalizedOld) + "\\s*\\(";
-        String getterReplacement = "get" + capitalizedNew + "(";
+        // Rename getter method: getFieldName( -> getNewFieldName(
+        String getterPattern = "\\bget" + Pattern.quote(capitalizedOld) + "(\\s*\\()";
+        String getterReplacement = "get" + capitalizedNew + "$1";
         result = result.replaceAll(getterPattern, getterReplacement);
 
-        // 4. Rename setters: setFieldName() -> setNewFieldName()
-        String setterPattern = "\\bset" + Pattern.quote(capitalizedOld) + "\\s*\\(";
-        String setterReplacement = "set" + capitalizedNew + "(";
+        // Rename setter method: setFieldName( -> setNewFieldName(
+        String setterPattern = "\\bset" + Pattern.quote(capitalizedOld) + "(\\s*\\()";
+        String setterReplacement = "set" + capitalizedNew + "$1";
         result = result.replaceAll(setterPattern, setterReplacement);
 
-        // 5. Handle boolean getters: isFieldName() -> isNewFieldName()
+        // Handle boolean getters: isFieldName( -> isNewFieldName(
         if (field.fieldType.equals("boolean") || field.fieldType.equals("Boolean")) {
-            String boolGetterPattern = "\\bis" + Pattern.quote(capitalizedOld) + "\\s*\\(";
-            String boolGetterReplacement = "is" + capitalizedNew + "(";
+            String boolGetterPattern = "\\bis" + Pattern.quote(capitalizedOld) + "(\\s*\\()";
+            String boolGetterReplacement = "is" + capitalizedNew + "$1";
             result = result.replaceAll(boolGetterPattern, boolGetterReplacement);
         }
 
+        // 3. Rename field usages (both this.fieldName and bare fieldName)
+        // This is done after getter/setter renaming to avoid conflicts
+        // We need to be careful to NOT rename:
+        // - Method parameters (Type fieldName)
+        // - Local variable declarations
+        result = renameFieldUsages(result, field.fieldName, field.newFieldName);
+
         return result;
+    }
+
+    /**
+     * Rename field usages in the class while avoiding method parameters and local variables.
+     * Uses a line-by-line approach to detect and skip parameter/variable declarations.
+     */
+    private String renameFieldUsages(String content, String oldName, String newName) {
+        String[] lines = content.split("\n", -1);
+        StringBuilder result = new StringBuilder();
+
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            String trimmed = line.trim();
+
+            // Skip if this line contains a parameter or local variable declaration with the field name
+            // Pattern: Type fieldName) or Type fieldName = or Type fieldName,
+            if (trimmed.matches(".*\\b\\w+\\s+" + Pattern.quote(oldName) + "\\s*[),=].*")) {
+                // This looks like a parameter or variable declaration - don't rename
+                result.append(line);
+            } else {
+                // Safe to rename field usages in this line
+                // Match: this.fieldName or bare fieldName (as whole word)
+                String pattern = "\\b(?:this\\.)?(" + Pattern.quote(oldName) + ")\\b";
+                String replacement = newName;
+
+                // Use a callback to ensure we're not renaming inside method declarations
+                line = line.replaceAll(pattern, replacement);
+                result.append(line);
+            }
+
+            // Add newline except for last line (to preserve original line ending behavior)
+            if (i < lines.length - 1) {
+                result.append("\n");
+            }
+        }
+
+        return result.toString();
     }
 
     private String capitalize(String str) {
