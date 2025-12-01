@@ -34,7 +34,7 @@ public class App
             case "2":
                 System.out.println("---Starting property renamer---");
                 PropertyRenameRunner propertyRenameRunner = new PropertyRenameRunner();
-                propertyRenameRunner.runPropertyRename(args);
+                propertyRenameRunner.runPropertyRename(args, false);
                 break;
             default:
                 System.out.println("Invalid choice. Please run again and select 1, 2, or 3.");

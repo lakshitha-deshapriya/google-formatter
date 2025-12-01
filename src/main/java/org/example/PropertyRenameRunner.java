@@ -5,7 +5,7 @@ import java.util.*;
 
 public class PropertyRenameRunner {
 
-    public void runPropertyRename(String[] args) {
+    public void runPropertyRename(String[] args, boolean renameGetSet) {
         String baseProjFolder;
         if (args.length > 0) {
             baseProjFolder = args[0];
@@ -64,6 +64,7 @@ public class PropertyRenameRunner {
 
         List<PropertyRenamer.RenameResult> allResults = new ArrayList<>();
         Map<String, List<PropertyScanner.PropertyMatch>> fileMatches = new HashMap<>();
+        Map<String, String> fieldRenames = new HashMap<>();  // Track field renames: "ClassName.oldField" -> "newField"
 
         // First, scan all files and collect property matches
         System.out.println("Scanning files...");
@@ -92,11 +93,43 @@ public class PropertyRenameRunner {
                 List<PropertyRenamer.RenameResult> results =
                     propertyRenamer.renamePropertiesInFile(javaFile, new ArrayList<>(), mappings);
                 allResults.addAll(results);
+
+                // Track field renames from nested classes for later getter/setter updates
+                for (PropertyRenamer.RenameResult result : results) {
+                    if (result.status == PropertyRenamer.RenameStatus.RENAMED &&
+                        result.patternType.contains("Nested configuration field")) {
+                        // Extract class name from file path
+                        String className = extractClassName(javaFile);
+                        if (className != null) {
+                            String key = className + "." + result.oldKey;
+                            fieldRenames.put(key, result.newKey);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Update getter/setter calls in all files based on field renames
+        if (!fieldRenames.isEmpty() && renameGetSet) {
+            System.out.println("Updating getter/setter calls for renamed fields...\n");
+            for (String javaFile : allJavaFiles) {
+                List<PropertyRenamer.RenameResult> results =
+                    propertyRenamer.updateGetterSetterCalls(javaFile, fieldRenames);
+                allResults.addAll(results);
             }
         }
 
         // Generate summary report
         generateSummaryReport(allResults, separator);
+    }
+
+    private String extractClassName(String filePath) {
+        File file = new File(filePath);
+        String fileName = file.getName();
+        if (fileName.endsWith(".java")) {
+            return fileName.substring(0, fileName.length() - 5);
+        }
+        return null;
     }
 
     private void collectPropertyMatches(File directory, PropertyScanner scanner,

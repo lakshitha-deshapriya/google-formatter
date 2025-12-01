@@ -595,6 +595,113 @@ public class PropertyRenamer {
         }
     }
 
+    public List<RenameResult> updateGetterSetterCalls(String filePath, Map<String, String> fieldRenames) {
+        List<RenameResult> results = new ArrayList<>();
+
+        if (fieldRenames.isEmpty()) {
+            return results;
+        }
+
+        try {
+            File file = new File(filePath);
+            String content = readFileContent(file);
+            String modifiedContent = content;
+            boolean fileModified = false;
+
+            // For each field rename, update getter/setter calls
+            for (Map.Entry<String, String> entry : fieldRenames.entrySet()) {
+                String key = entry.getKey(); // e.g., "IdentityAdapterDefinition.appId"
+                String newFieldName = entry.getValue(); // e.g., "appIds"
+
+                // Extract class name and old field name
+                String[] parts = key.split("\\.");
+                if (parts.length != 2) continue;
+
+                String className = parts[0];
+                String oldFieldName = parts[1];
+
+                // Generate getter/setter names
+                String oldGetter = "get" + capitalize(oldFieldName);
+                String newGetter = "get" + capitalize(newFieldName);
+                String oldSetter = "set" + capitalize(oldFieldName);
+                String newSetter = "set" + capitalize(newFieldName);
+
+                // Update getter calls: .getOldField( -> .getNewField(
+                String getterPattern = "\\." + Pattern.quote(oldGetter) + "(\\s*\\()";
+                String getterReplacement = "." + newGetter + "$1";
+                String updated = modifiedContent.replaceAll(getterPattern, getterReplacement);
+
+                if (!updated.equals(modifiedContent)) {
+                    modifiedContent = updated;
+                    fileModified = true;
+                    results.add(new RenameResult(
+                        filePath,
+                        -1,
+                        className + "." + oldGetter + "()",
+                        className + "." + newGetter + "()",
+                        RenameStatus.RENAMED,
+                        "Getter call update"
+                    ));
+                }
+
+                // Update setter calls: .setOldField( -> .setNewField(
+                String setterPattern = "\\." + Pattern.quote(oldSetter) + "(\\s*\\()";
+                String setterReplacement = "." + newSetter + "$1";
+                updated = modifiedContent.replaceAll(setterPattern, setterReplacement);
+
+                if (!updated.equals(modifiedContent)) {
+                    modifiedContent = updated;
+                    fileModified = true;
+                    results.add(new RenameResult(
+                        filePath,
+                        -1,
+                        className + "." + oldSetter + "()",
+                        className + "." + newSetter + "()",
+                        RenameStatus.RENAMED,
+                        "Setter call update"
+                    ));
+                }
+
+                // Handle boolean getters: .isOldField( -> .isNewField(
+                String oldIsGetter = "is" + capitalize(oldFieldName);
+                String newIsGetter = "is" + capitalize(newFieldName);
+                String isGetterPattern = "\\." + Pattern.quote(oldIsGetter) + "(\\s*\\()";
+                String isGetterReplacement = "." + newIsGetter + "$1";
+                updated = modifiedContent.replaceAll(isGetterPattern, isGetterReplacement);
+
+                if (!updated.equals(modifiedContent)) {
+                    modifiedContent = updated;
+                    fileModified = true;
+                    results.add(new RenameResult(
+                        filePath,
+                        -1,
+                        className + "." + oldIsGetter + "()",
+                        className + "." + newIsGetter + "()",
+                        RenameStatus.RENAMED,
+                        "Boolean getter call update"
+                    ));
+                }
+            }
+
+            // Write changes if anything was modified
+            if (fileModified) {
+                writeFileContent(file, modifiedContent);
+            }
+
+        } catch (IOException e) {
+            System.err.println("Error updating getter/setter calls in file: " + filePath + " - " + e.getMessage());
+        }
+
+        return results;
+    }
+
+    private String capitalize(String str) {
+        if (str == null || str.isEmpty()) {
+            return str;
+        }
+        return str.substring(0, 1).toUpperCase() + str.substring(1);
+    }
+
     public enum RenameStatus {
         RENAMED,        // Property was renamed
         UNCHANGED,      // Mapping exists but old and new are the same
