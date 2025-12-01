@@ -55,9 +55,6 @@ public class ConfigurationPropertiesAnalyzer {
         }
     }
 
-    /**
-     * Information about a field in the configuration class
-     */
     public static class FieldInfo {
         public String fieldName;
         public String fieldType;
@@ -332,12 +329,8 @@ public class ConfigurationPropertiesAnalyzer {
             String className = classMatcher.group(1);
             int classLineNumber = calculateLineNumber(content, classMatcher.start());
 
-            // Find the prefix that this class is associated with
-            // Strategy: Look for indexed property patterns that could reference this class
             String matchedPrefix = null;
 
-            // Pattern 1: prefix.collection[0].field (e.g., identity.adapters[0].appId)
-            // Pattern 2: prefix[0].field (e.g., identity-settings[0].entityId)
             for (Map.Entry<String, String> mapping : mappings.entrySet()) {
                 String oldKey = mapping.getKey();
 
@@ -354,14 +347,9 @@ public class ConfigurationPropertiesAnalyzer {
                         String[] parts = fullPrefix.split("\\.");
                         String prefixPart = parts[parts.length - 1]; // e.g., "adapters" or "identity-settings"
 
-                        // Check if class name is related to this prefix
-                        // Remove hyphens and convert to lower case for comparison
                         String normalizedPrefix = prefixPart.replace("-", "").toLowerCase();
                         String normalizedClassName = className.toLowerCase();
 
-                        // Check various matching strategies:
-                        // 1. Direct contains (e.g., "identitysettings" contains in "IdentitySettingProperties")
-                        // 2. Singular form (e.g., "adapter" in "IdentityAdapterDefinition")
                         String singular = prefixPart.replaceAll("s$", "").replace("-", "").toLowerCase();
 
                         if (normalizedClassName.contains(normalizedPrefix) ||
@@ -375,7 +363,6 @@ public class ConfigurationPropertiesAnalyzer {
             }
 
             if (matchedPrefix == null) {
-                // This class doesn't seem to be the nested type for any indexed property
                 return null;
             }
 
@@ -428,11 +415,6 @@ public class ConfigurationPropertiesAnalyzer {
         }
     }
 
-    /**
-     * Extract field name from indexed property notation.
-     * E.g., "identity.adapters[0].appId" -> "appId"
-     *       "identity.adapters[0].baseUrl" -> "baseUrl"
-     */
     private String extractFieldNameFromIndexedProperty(String propertyKey) {
         if (propertyKey == null) {
             return null;
@@ -451,11 +433,6 @@ public class ConfigurationPropertiesAnalyzer {
         return null;
     }
 
-    /**
-     * Extract collection field name from indexed property notation.
-     * E.g., "identity.adapters[0].appId" with prefix "identity" -> "adapters"
-     *       "identiti.adapter[0].appIds" with prefix "identiti" -> "adapter"
-     */
     private String extractCollectionFieldFromIndexedProperty(String propertyKey, String prefix) {
         if (propertyKey == null || prefix == null) {
             return null;
@@ -499,14 +476,10 @@ public class ConfigurationPropertiesAnalyzer {
             return newPrefix.toString();
         }
 
-        // Case 2: Number of parts differ
-        // Count remaining parts after removing old prefix
         int remainingPartsAfterPrefix = oldPartsCount - oldPrefixPartsCount;
 
-        // Calculate new prefix parts count
         int newPrefixPartsCount = newPartsCount - remainingPartsAfterPrefix;
 
-        // Build the new prefix
         if (newPrefixPartsCount > 0 && newPrefixPartsCount <= newPartsCount) {
             StringBuilder newPrefix = new StringBuilder();
             for (int i = 0; i < newPrefixPartsCount; i++) {
@@ -518,7 +491,6 @@ public class ConfigurationPropertiesAnalyzer {
             return newPrefix.toString();
         }
 
-        // Fallback: return the first part of the new property
         return newParts[0];
     }
 
@@ -589,11 +561,6 @@ public class ConfigurationPropertiesAnalyzer {
             result = result.replaceAll(boolGetterPattern, boolGetterReplacement);
         }
 
-        // 3. Rename field usages (both this.fieldName and bare fieldName)
-        // This is done after getter/setter renaming to avoid conflicts
-        // We need to be careful to NOT rename:
-        // - Method parameters (Type fieldName)
-        // - Local variable declarations
         result = renameFieldUsages(result, field.fieldName, field.newFieldName);
 
         return result;
@@ -611,23 +578,16 @@ public class ConfigurationPropertiesAnalyzer {
             String line = lines[i];
             String trimmed = line.trim();
 
-            // Skip if this line contains a parameter or local variable declaration with the field name
-            // Pattern: Type fieldName) or Type fieldName = or Type fieldName,
             if (trimmed.matches(".*\\b\\w+\\s+" + Pattern.quote(oldName) + "\\s*[),=].*")) {
-                // This looks like a parameter or variable declaration - don't rename
                 result.append(line);
             } else {
-                // Safe to rename field usages in this line
-                // Match: this.fieldName or bare fieldName (as whole word)
                 String pattern = "\\b(?:this\\.)?(" + Pattern.quote(oldName) + ")\\b";
                 String replacement = newName;
 
-                // Use a callback to ensure we're not renaming inside method declarations
                 line = line.replaceAll(pattern, replacement);
                 result.append(line);
             }
 
-            // Add newline except for last line (to preserve original line ending behavior)
             if (i < lines.length - 1) {
                 result.append("\n");
             }
@@ -702,20 +662,12 @@ public class ConfigurationPropertiesAnalyzer {
                 }
             }
 
-            // Capture field declarations with two patterns:
-            // 1. Standard: (private|public) Type fieldName;
-            // 2. With inline annotations: @Annotation (private|public) Type fieldName;
-            // Match field declarations that may have annotations on the same line
             boolean isFieldDeclaration = trimmed.matches(".*\\b(private|public)\\s+[\\w<>\\[\\],\\s]+\\s+\\w+\\s*(?:=.*)?;.*");
 
             if (isFieldDeclaration) {
-                // Capture fields from:
-                // 1. Main class (not in nested class)
-                // 2. Nested class with @ConfigurationProperties
                 if (!inNestedClass || nestedClassHasConfigProperties) {
                     fields.add(line);
                 }
-                // Clear annotations after processing field
                 recentAnnotations.clear();
             }
 
