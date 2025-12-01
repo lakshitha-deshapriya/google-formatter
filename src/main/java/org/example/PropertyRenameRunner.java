@@ -26,8 +26,14 @@ public class PropertyRenameRunner {
             return;
         }
 
-        System.out.print("CSV mapping file path: ");
+        System.out.print("CSV mapping file path (press Enter for default 'sample-property-mapping.csv'): ");
         String csvFilePath = scanner.nextLine().trim();
+
+        // Use default if no path provided
+        if (csvFilePath.isEmpty()) {
+            csvFilePath = "sample-property-mapping.csv";
+            System.out.println("Using default CSV file: " + csvFilePath);
+        }
 
         File csvFile = new File(csvFilePath);
         if (!csvFile.exists() || !csvFile.isFile()) {
