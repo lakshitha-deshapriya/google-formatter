@@ -526,14 +526,33 @@ public class ConfigurationPropertiesAnalyzer {
         StringBuilder content = new StringBuilder();
         try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
             String line;
+            boolean firstLine = true;
             while ((line = reader.readLine()) != null) {
-                content.append(line).append("\n");
+                if (!firstLine) {
+                    content.append("\n");
+                }
+                content.append(line);
+                firstLine = false;
             }
         }
 
-        // Remove trailing newline if added
-        if (content.length() > 0 && content.charAt(content.length() - 1) == '\n') {
-            content.setLength(content.length() - 1);
+        // Check if original file ended with newline(s) and preserve them
+        try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+            if (raf.length() > 0) {
+                raf.seek(raf.length() - 1);
+                byte lastByte = raf.readByte();
+                if (lastByte == '\n') {
+                    content.append("\n");
+                    // Check for multiple trailing newlines
+                    if (raf.length() > 1) {
+                        raf.seek(raf.length() - 2);
+                        byte secondLastByte = raf.readByte();
+                        if (secondLastByte == '\n') {
+                            content.append("\n");
+                        }
+                    }
+                }
+            }
         }
 
         return content.toString();

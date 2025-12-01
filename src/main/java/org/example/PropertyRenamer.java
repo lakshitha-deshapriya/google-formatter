@@ -360,12 +360,26 @@ public class PropertyRenamer {
 
             // Write back if modified
             if (fileModified) {
+                // Check if original file had trailing newline
+                boolean hadTrailingNewline = false;
+                try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+                    if (raf.length() > 0) {
+                        raf.seek(raf.length() - 1);
+                        byte lastByte = raf.readByte();
+                        hadTrailingNewline = (lastByte == '\n' || lastByte == '\r');
+                    }
+                }
+
                 try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
                     for (int i = 0; i < lines.size(); i++) {
                         writer.write(lines.get(i));
                         if (i < lines.size() - 1) {
                             writer.write("\n");
                         }
+                    }
+                    // Preserve trailing newline if the original file had one
+                    if (hadTrailingNewline) {
+                        writer.write("\n");
                     }
                 }
             }

@@ -4,7 +4,7 @@ validation.email.regex,validation.email.regexr
 membership-settings.max-members,membership.settings.maximum-members
 membership-settings.min-members,membership.settings.min-members
 java.io.tmpdir,java.io.tmpdirs
-identity.adapters[0].appId,identity.adapters[0].appIds
+identity.adapters[0].appId,identiti.adapter[0].appIds
 auto-generate-cif.enabled,auto.generate.cif.enabled
 kafka.topics.user-data-changed,kafka.topics.user-data-changed-topic
 
