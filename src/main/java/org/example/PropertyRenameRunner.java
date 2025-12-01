@@ -67,7 +67,8 @@ public class PropertyRenameRunner {
 
         // First, scan all files and collect property matches
         System.out.println("Scanning files...");
-        collectPropertyMatches(directory, propertyScanner, fileMatches);
+        List<String> allJavaFiles = new ArrayList<>();
+        collectPropertyMatches(directory, propertyScanner, fileMatches, allJavaFiles);
 
         System.out.println("Found properties in " + fileMatches.size() + " files");
         System.out.println("\nRenaming properties...\n");
@@ -82,12 +83,25 @@ public class PropertyRenameRunner {
             allResults.addAll(results);
         }
 
+        // Also process files that might be nested configuration classes
+        // (files that don't have property matches but might contain fields used in indexed properties)
+        System.out.println("Checking for nested configuration classes...\n");
+        for (String javaFile : allJavaFiles) {
+            if (!fileMatches.containsKey(javaFile)) {
+                // This file has no property matches, but might be a nested config class
+                List<PropertyRenamer.RenameResult> results =
+                    propertyRenamer.renamePropertiesInFile(javaFile, new ArrayList<>(), mappings);
+                allResults.addAll(results);
+            }
+        }
+
         // Generate summary report
         generateSummaryReport(allResults, separator);
     }
 
     private void collectPropertyMatches(File directory, PropertyScanner scanner,
-                                       Map<String, List<PropertyScanner.PropertyMatch>> fileMatches) {
+                                       Map<String, List<PropertyScanner.PropertyMatch>> fileMatches,
+                                       List<String> allJavaFiles) {
         File[] files = directory.listFiles();
         if (files != null) {
             for (File file : files) {
@@ -98,12 +112,18 @@ public class PropertyRenameRunner {
                         !dirName.equals("build") &&
                         !dirName.equals(".git") &&
                         !dirName.equals("node_modules")) {
-                        collectPropertyMatches(file, scanner, fileMatches);
+                        collectPropertyMatches(file, scanner, fileMatches, allJavaFiles);
                     }
-                } else if (file.isFile() && file.getName().endsWith(".java")) {
-                    List<PropertyScanner.PropertyMatch> matches = scanner.scanFile(file.getAbsolutePath());
+                } else if (file.isFile() && (file.getName().endsWith(".java") ||
+                                             file.getName().endsWith(".properties") ||
+                                             file.getName().endsWith(".yml") ||
+                                             file.getName().endsWith(".yaml"))) {
+                    String absolutePath = file.getAbsolutePath();
+                    allJavaFiles.add(absolutePath);
+
+                    List<PropertyScanner.PropertyMatch> matches = scanner.scanFile(absolutePath);
                     if (!matches.isEmpty()) {
-                        fileMatches.put(file.getAbsolutePath(), matches);
+                        fileMatches.put(absolutePath, matches);
                     }
                 }
             }

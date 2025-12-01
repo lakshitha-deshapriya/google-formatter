@@ -235,6 +235,91 @@ public class ConfigurationPropertiesAnalyzer {
     }
 
     /**
+     * Analyze a file that is a nested configuration class (not annotated with @ConfigurationProperties)
+     * This handles cases like IdentityAdapterDefinition where fields are mapped via indexed properties.
+     */
+    public AnalysisResult analyzeNestedConfigClass(String filePath, Map<String, String> mappings) {
+        try {
+            String content = readFileContent(new File(filePath));
+
+            // Find the class declaration
+            Pattern classPattern = Pattern.compile("(?:public\\s+)?class\\s+(\\w+)", Pattern.MULTILINE);
+            Matcher classMatcher = classPattern.matcher(content);
+            if (!classMatcher.find()) {
+                return null;
+            }
+
+            String className = classMatcher.group(1);
+            int classLineNumber = calculateLineNumber(content, classMatcher.start());
+
+            // Create a pseudo analysis result (no prefix for nested classes)
+            AnalysisResult result = new AnalysisResult(filePath, "", className, classLineNumber);
+
+            // Find all fields
+            Matcher fieldMatcher = FIELD_DECLARATION.matcher(content);
+            while (fieldMatcher.find()) {
+                String fieldType = fieldMatcher.group(1).trim();
+                String fieldName = fieldMatcher.group(2);
+                int lineNumber = calculateLineNumber(content, fieldMatcher.start());
+
+                FieldInfo fieldInfo = new FieldInfo(fieldName, fieldType, lineNumber);
+
+                // Check mappings for indexed properties like identity.adapters[0].appId
+                // We need to find mappings that end with the field name
+                for (Map.Entry<String, String> mapping : mappings.entrySet()) {
+                    String oldKey = mapping.getKey();
+                    String newKey = mapping.getValue();
+
+                    // Extract field name from indexed property (e.g., adapters[0].appId -> appId)
+                    String extractedFieldName = extractFieldNameFromIndexedProperty(oldKey);
+
+                    if (extractedFieldName != null && extractedFieldName.equals(fieldName)) {
+                        // Extract the new field name from the new property
+                        String newFieldNameExtracted = extractFieldNameFromIndexedProperty(newKey);
+
+                        if (newFieldNameExtracted != null && !newFieldNameExtracted.equals(fieldName)) {
+                            fieldInfo.newFieldName = newFieldNameExtracted;
+                            fieldInfo.needsRename = true;
+                            fieldInfo.fullPropertyPath = oldKey;
+                        }
+                    }
+                }
+
+                result.fields.add(fieldInfo);
+            }
+
+            return result;
+
+        } catch (IOException e) {
+            System.err.println("Error analyzing nested config class: " + filePath + " - " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Extract field name from indexed property notation.
+     * E.g., "identity.adapters[0].appId" -> "appId"
+     *       "identity.adapters[0].baseUrl" -> "baseUrl"
+     */
+    private String extractFieldNameFromIndexedProperty(String propertyKey) {
+        if (propertyKey == null) {
+            return null;
+        }
+
+        // Check if it contains array index notation
+        Pattern indexedPattern = Pattern.compile("\\[\\d+\\]\\.([\\w-]+)$");
+        Matcher matcher = indexedPattern.matcher(propertyKey);
+
+        if (matcher.find()) {
+            String fieldPart = matcher.group(1);
+            // Convert kebab-case to camelCase
+            return FieldInfo.toFieldName(fieldPart);
+        }
+
+        return null;
+    }
+
+    /**
      * Determine the new prefix by comparing old and new property structures.
      *
      * Logic:

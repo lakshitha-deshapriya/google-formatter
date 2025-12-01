@@ -27,6 +27,11 @@ public class PropertyRenamer {
                                                       Map<String, String> mappings) {
         List<RenameResult> results = new ArrayList<>();
 
+        // Check if this file is a nested configuration class (no property matches but has indexed property mappings)
+        if (propertyMatches.isEmpty() && isNestedConfigClass(filePath, mappings)) {
+            return handleNestedConfigClass(filePath, mappings);
+        }
+
         if (propertyMatches.isEmpty()) {
             return results;
         }
@@ -42,6 +47,55 @@ public class PropertyRenamer {
 
         // Otherwise, handle as a regular file
         return handleRegularFile(filePath, propertyMatches, mappings);
+    }
+
+    /**
+     * Check if a file is a nested configuration class based on indexed property mappings.
+     * E.g., if mappings contain "identity.adapters[0].appId" and the file defines appId field.
+     */
+    private boolean isNestedConfigClass(String filePath, Map<String, String> mappings) {
+        // Check if any mapping contains indexed property notation
+        for (String key : mappings.keySet()) {
+            if (key.matches(".*\\[\\d+\\]\\.\\w+.*")) {
+                return true; // This indicates indexed properties exist
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Handle nested configuration classes (like IdentityAdapterDefinition)
+     * that are used in List/array properties with indexed notation.
+     */
+    private List<RenameResult> handleNestedConfigClass(String filePath, Map<String, String> mappings) {
+        List<RenameResult> results = new ArrayList<>();
+
+        // Use the analyzer to process nested config class
+        ConfigurationPropertiesAnalyzer.AnalysisResult analysis =
+            configPropertiesAnalyzer.analyzeNestedConfigClass(filePath, mappings);
+
+        if (analysis == null || analysis.fields.isEmpty()) {
+            return results;
+        }
+
+        // Process field renames
+        for (ConfigurationPropertiesAnalyzer.FieldInfo field : analysis.fields) {
+            if (field.needsRename) {
+                results.add(new RenameResult(
+                    filePath,
+                    field.lineNumber,
+                    field.fieldName,
+                    field.newFieldName,
+                    RenameStatus.RENAMED,
+                    "Nested configuration field (used in indexed property)"
+                ));
+            }
+        }
+
+        // Apply changes to the file
+        configPropertiesAnalyzer.applyChanges(analysis);
+
+        return results;
     }
 
     /**
@@ -149,6 +203,11 @@ public class PropertyRenamer {
                                                   Map<String, String> mappings) {
         List<RenameResult> results = new ArrayList<>();
 
+        // Check if this is a .properties file
+        if (filePath.endsWith(".properties") || filePath.endsWith(".yml") || filePath.endsWith(".yaml")) {
+            return handlePropertiesFile(filePath, propertyMatches, mappings);
+        }
+
         try {
             // Read the entire file
             File file = new File(filePath);
@@ -219,6 +278,100 @@ public class PropertyRenamer {
 
         } catch (IOException e) {
             System.err.println("Error processing file: " + filePath + " - " + e.getMessage());
+        }
+
+        return results;
+    }
+
+    /**
+     * Handle .properties files
+     */
+    private List<RenameResult> handlePropertiesFile(String filePath,
+                                                     List<PropertyScanner.PropertyMatch> propertyMatches,
+                                                     Map<String, String> mappings) {
+        List<RenameResult> results = new ArrayList<>();
+
+        try {
+            File file = new File(filePath);
+            List<String> lines = new ArrayList<>();
+
+            // Read all lines
+            try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    lines.add(line);
+                }
+            }
+
+            boolean fileModified = false;
+
+            // Process each property match
+            for (PropertyScanner.PropertyMatch match : propertyMatches) {
+                String oldKey = match.propertyKey;
+
+                if (mappings.containsKey(oldKey)) {
+                    String newKey = mappings.get(oldKey);
+
+                    if (oldKey.equals(newKey)) {
+                        results.add(new RenameResult(
+                            filePath,
+                            match.lineNumber,
+                            oldKey,
+                            newKey,
+                            RenameStatus.UNCHANGED,
+                            match.patternType
+                        ));
+                    } else {
+                        // Replace the property key in the line
+                        int lineIndex = match.lineNumber - 1;
+                        if (lineIndex >= 0 && lineIndex < lines.size()) {
+                            String line = lines.get(lineIndex);
+
+                            // Replace the key (handle both = and : separators)
+                            String newLine = line.replaceFirst(
+                                "^(\\s*)" + Pattern.quote(oldKey) + "(\\s*[=:])",
+                                "$1" + newKey + "$2"
+                            );
+
+                            lines.set(lineIndex, newLine);
+                            fileModified = true;
+
+                            results.add(new RenameResult(
+                                filePath,
+                                match.lineNumber,
+                                oldKey,
+                                newKey,
+                                RenameStatus.RENAMED,
+                                match.patternType
+                            ));
+                        }
+                    }
+                } else {
+                    results.add(new RenameResult(
+                        filePath,
+                        match.lineNumber,
+                        oldKey,
+                        null,
+                        RenameStatus.NO_MAPPING,
+                        match.patternType
+                    ));
+                }
+            }
+
+            // Write back if modified
+            if (fileModified) {
+                try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
+                    for (int i = 0; i < lines.size(); i++) {
+                        writer.write(lines.get(i));
+                        if (i < lines.size() - 1) {
+                            writer.write("\n");
+                        }
+                    }
+                }
+            }
+
+        } catch (IOException e) {
+            System.err.println("Error processing properties file: " + filePath + " - " + e.getMessage());
         }
 
         return results;

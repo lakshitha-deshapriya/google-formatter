@@ -47,6 +47,11 @@ public class PropertyScanner {
             return new ArrayList<>();
         }
 
+        // Check if it's a .properties or .yml file
+        if (filePath.endsWith(".properties") || filePath.endsWith(".yml") || filePath.endsWith(".yaml")) {
+            return scanPropertiesFile(filePath);
+        }
+
         List<PropertyMatch> matches = new ArrayList<>();
 
         try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
@@ -192,6 +197,66 @@ public class PropertyScanner {
         }
 
         return filtered;
+    }
+
+    /**
+     * Scan .properties or .yml files for property keys
+     */
+    private List<PropertyMatch> scanPropertiesFile(String filePath) {
+        List<PropertyMatch> matches = new ArrayList<>();
+        File file = new File(filePath);
+
+        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+            String line;
+            int lineNumber = 0;
+
+            while ((line = reader.readLine()) != null) {
+                lineNumber++;
+                String trimmed = line.trim();
+
+                // Skip comments and empty lines
+                if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!")) {
+                    continue;
+                }
+
+                // Extract property key (before = or :)
+                int separatorIndex = -1;
+                if (trimmed.contains("=")) {
+                    separatorIndex = trimmed.indexOf("=");
+                } else if (trimmed.contains(":")) {
+                    separatorIndex = trimmed.indexOf(":");
+                }
+
+                if (separatorIndex > 0) {
+                    String propertyKey = trimmed.substring(0, separatorIndex).trim();
+
+                    PropertyMatch match = new PropertyMatch(
+                        filePath,
+                        lineNumber,
+                        propertyKey,
+                        trimmed,
+                        "Property file entry"
+                    );
+
+                    matches.add(match);
+                }
+            }
+
+        } catch (IOException e) {
+            System.err.println("Error reading properties file: " + filePath + " - " + e.getMessage());
+        }
+
+        // Print results for this file (only if not in silent mode)
+        if (!silentMode && !matches.isEmpty()) {
+            System.out.println(filePath);
+            for (PropertyMatch match : matches) {
+                System.out.println("Line: " + match.lineNumber +
+                                 ", Property: " + match.propertyKey);
+            }
+            System.out.println();
+        }
+
+        return matches;
     }
 
     private String extractPropertyKey(String fullProperty) {
