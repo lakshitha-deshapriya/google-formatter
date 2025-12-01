@@ -1,0 +1,10 @@
+oldPropertyKey,newPropertyKey
+spring.application.name,spring.application.names
+validation.email.regex,validation.email.regexr
+membership-settings.max-members,membership.settings.maximum-members
+membership-settings.min-members,membership.settings.min-members
+java.io.tmpdir,java.io.tmpdirs
+identity.adapters.appId,identity.provider.adapter.appId
+auto-generate-cif.enabled,auto.generate.cif.enabled
+kafka.topics.user-data-changed,kafka.topics.user-data-changed-topic
+
