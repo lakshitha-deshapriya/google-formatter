@@ -34,9 +34,6 @@ public class ConfigurationPropertiesAnalyzer {
         Pattern.MULTILINE
     );
 
-    /**
-     * Result of analyzing a @ConfigurationProperties class
-     */
     public static class AnalysisResult {
         public String filePath;
         public String prefix;
@@ -88,7 +85,6 @@ public class ConfigurationPropertiesAnalyzer {
                 this.isMap = true;
                 extractGenericType();
             } else if (!isPrimitiveOrWrapper(fieldType) && !fieldType.equals("String")) {
-                // If it's not a primitive, wrapper, or String, it might be a nested configuration
                 this.isNested = true;
             }
         }
@@ -117,17 +113,11 @@ public class ConfigurationPropertiesAnalyzer {
                               "Integer|Long|Double|Float|Boolean|Byte|Short|Character");
         }
 
-        /**
-         * Convert field name to property format (camelCase to kebab-case)
-         */
         public String toPropertyName() {
             // Convert camelCase to kebab-case
             return fieldName.replaceAll("([a-z0-9])([A-Z])", "$1-$2").toLowerCase();
         }
 
-        /**
-         * Convert property name to field name (kebab-case to camelCase)
-         */
         public static String toFieldName(String propertyName) {
             // Convert kebab-case to camelCase
             StringBuilder result = new StringBuilder();
@@ -148,9 +138,6 @@ public class ConfigurationPropertiesAnalyzer {
         }
     }
 
-    /**
-     * Analyze a file with @ConfigurationProperties annotation
-     */
     public AnalysisResult analyzeFile(String filePath, Map<String, String> mappings) {
         try {
             String content = readFileContent(new File(filePath));
@@ -167,7 +154,7 @@ public class ConfigurationPropertiesAnalyzer {
                 return analyzeMethodLevelConfiguration(filePath, content, methodMatcher, mappings);
             }
 
-            return null; // Not a @ConfigurationProperties class or method
+            return null;
 
         } catch (IOException e) {
             System.err.println("Error analyzing file: " + filePath + " - " + e.getMessage());
@@ -175,9 +162,6 @@ public class ConfigurationPropertiesAnalyzer {
         }
     }
 
-    /**
-     * Analyze class-level @ConfigurationProperties (original behavior)
-     */
     private AnalysisResult analyzeClassLevelConfiguration(String filePath, String content,
                                                           Matcher classMatcher, Map<String, String> mappings) {
         String prefix = classMatcher.group(1);
@@ -211,12 +195,11 @@ public class ConfigurationPropertiesAnalyzer {
         // Find all fields in the main class only (not in nested classes)
         List<String> mainClassFields = extractMainClassFields(classBody);
 
-        int currentPos = classStartPos;
         for (String fieldLine : mainClassFields) {
             Matcher fieldMatcher = FIELD_DECLARATION.matcher(fieldLine);
             if (fieldMatcher.find()) {
-                String fieldType = fieldMatcher.group(2).trim(); // Group 2 is now the type
-                String fieldName = fieldMatcher.group(3); // Group 3 is now the field name
+                String fieldType = fieldMatcher.group(2).trim();
+                String fieldName = fieldMatcher.group(3);
 
                 // Calculate line number relative to the original content
                 int fieldPosInBody = classBody.indexOf(fieldLine);
@@ -233,8 +216,6 @@ public class ConfigurationPropertiesAnalyzer {
                     if (mappings.containsKey(fieldInfo.fullPropertyPath)) {
                         String newPropertyPath = mappings.get(fieldInfo.fullPropertyPath);
 
-                        // Extract the new field name from the new property path
-                        // Remove the prefix part and get the remaining property name
                         String newPrefix = result.newPrefix != null ? result.newPrefix : prefix;
 
                         if (newPropertyPath.startsWith(newPrefix + ".")) {
@@ -262,7 +243,27 @@ public class ConfigurationPropertiesAnalyzer {
                                     fieldInfo.needsRename = !fieldInfo.fieldName.equals(fieldInfo.newFieldName);
                                     fieldInfo.fullPropertyPath = oldKey; // Store for reference
                                 }
-                                break; // Found a mapping for this field
+                                break;
+                            }
+                        }
+                    } else {
+                        for (Map.Entry<String, String> entry : mappings.entrySet()) {
+                            String oldKey = entry.getKey();
+                            String newKey = entry.getValue();
+
+                            if (!oldKey.startsWith(prefix + ".") && !oldKey.startsWith(prefix + "[")) {
+                                continue;
+                            }
+
+                            String fieldNameInProperty = extractFieldNameFromIndexedProperty(oldKey);
+                            if (fieldNameInProperty != null && fieldNameInProperty.equals(fieldName)) {
+                                String newFieldNameFromProperty = extractFieldNameFromIndexedProperty(newKey);
+                                if (newFieldNameFromProperty != null && !newFieldNameFromProperty.equals(fieldName)) {
+                                    fieldInfo.newFieldName = newFieldNameFromProperty;
+                                    fieldInfo.needsRename = true;
+                                    fieldInfo.fullPropertyPath = oldKey;
+                                    break;
+                                }
                             }
                         }
                     }
@@ -292,9 +293,7 @@ public class ConfigurationPropertiesAnalyzer {
                 .findFirst()
                 .ifPresent(entry -> {
                     result.newPrefix = determineNewPrefixForIndexed(
-                            entry.getKey(),
-                            entry.getValue(),
-                            prefix
+                            entry.getValue()
                     );
                     result.prefixChanged = !prefix.equals(result.newPrefix);
                 });
@@ -302,7 +301,7 @@ public class ConfigurationPropertiesAnalyzer {
         return result;
     }
 
-    private String determineNewPrefixForIndexed(String oldProperty, String newProperty, String oldPrefix) {
+    private String determineNewPrefixForIndexed(String newProperty) {
         // Extract prefix before the bracket or dot
         String newPrefixPart;
         if (newProperty.contains("[")) {
@@ -533,14 +532,12 @@ public class ConfigurationPropertiesAnalyzer {
     private String renameFieldInClass(String content, FieldInfo field) {
         String result = content;
 
-        // 1. Rename field declaration
-        // Match: private Type fieldName; or private Type fieldName = value;
-        String fieldPattern = "(\\bprivate\\s+" + Pattern.quote(field.fieldType) +
-                            "\\s+)" + Pattern.quote(field.fieldName) + "(\\s*(?:=.*)?;)";
+        String fieldPattern = "((?:@\\w+(?:\\s+@\\w+)*\\s+)?\\b(?:private|public)\\s+" +
+                            Pattern.quote(field.fieldType) + "\\s+)" +
+                            Pattern.quote(field.fieldName) + "(\\s*(?:=.*)?;)";
         String fieldReplacement = "$1" + field.newFieldName + "$2";
         result = result.replaceAll(fieldPattern, fieldReplacement);
 
-        // 2. Rename getters and setters (method names only, not parameters)
         String capitalizedOld = capitalize(field.fieldName);
         String capitalizedNew = capitalize(field.newFieldName);
 
@@ -566,10 +563,6 @@ public class ConfigurationPropertiesAnalyzer {
         return result;
     }
 
-    /**
-     * Rename field usages in the class while avoiding method parameters and local variables.
-     * Uses a line-by-line approach to detect and skip parameter/variable declarations.
-     */
     private String renameFieldUsages(String content, String oldName, String newName) {
         String[] lines = content.split("\n", -1);
         StringBuilder result = new StringBuilder();
@@ -582,9 +575,8 @@ public class ConfigurationPropertiesAnalyzer {
                 result.append(line);
             } else {
                 String pattern = "\\b(?:this\\.)?(" + Pattern.quote(oldName) + ")\\b";
-                String replacement = newName;
 
-                line = line.replaceAll(pattern, replacement);
+                line = line.replaceAll(pattern, newName);
                 result.append(line);
             }
 
@@ -614,8 +606,6 @@ public class ConfigurationPropertiesAnalyzer {
     }
 
     private int findClassEnd(String content, int classStartPos) {
-        // For simplicity, we'll find the last closing brace
-        // A better approach would be to track brace depth
         int lastBrace = content.lastIndexOf('}');
         return lastBrace > classStartPos ? lastBrace : content.length();
     }

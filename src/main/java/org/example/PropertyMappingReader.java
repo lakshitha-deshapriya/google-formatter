@@ -8,14 +8,6 @@ import java.util.Map;
 
 public class PropertyMappingReader {
 
-    /**
-     * Reads a CSV file with property mappings.
-     * Expected format: oldPropertyKey,newPropertyKey
-     * First line is treated as header and skipped.
-     *
-     * @param csvFilePath Path to the CSV file
-     * @return Map of old property key to new property key
-     */
     public Map<String, String> readMappings(String csvFilePath) {
         Map<String, String> mappings = new HashMap<>();
 

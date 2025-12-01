@@ -14,21 +14,13 @@ public class PropertyRenamer {
         this.configPropertiesAnalyzer = new ConfigurationPropertiesAnalyzer();
     }
 
-    /**
-     * Renames properties in a file based on the provided mapping.
-     *
-     * @param filePath Path to the file to modify
-     * @param propertyMatches List of property matches found in the file
-     * @param mappings Map of old property key to new property key
-     * @return List of RenameResult objects describing what was done
-     */
     public List<RenameResult> renamePropertiesInFile(String filePath,
                                                       List<PropertyScanner.PropertyMatch> propertyMatches,
                                                       Map<String, String> mappings) {
         List<RenameResult> results = new ArrayList<>();
 
         // Check if this file is a nested configuration class (no property matches but has indexed property mappings)
-        if (propertyMatches.isEmpty() && isNestedConfigClass(filePath, mappings)) {
+        if (propertyMatches.isEmpty() && isNestedConfigClass(mappings)) {
             return handleNestedConfigClass(filePath, mappings);
         }
 
@@ -49,24 +41,16 @@ public class PropertyRenamer {
         return handleRegularFile(filePath, propertyMatches, mappings);
     }
 
-    /**
-     * Check if a file is a nested configuration class based on indexed property mappings.
-     * E.g., if mappings contain "identity.adapters[0].appId" and the file defines appId field.
-     */
-    private boolean isNestedConfigClass(String filePath, Map<String, String> mappings) {
+    private boolean isNestedConfigClass(Map<String, String> mappings) {
         // Check if any mapping contains indexed property notation
         for (String key : mappings.keySet()) {
             if (key.matches(".*\\[\\d+\\]\\.\\w+.*")) {
-                return true; // This indicates indexed properties exist
+                return true;
             }
         }
         return false;
     }
 
-    /**
-     * Handle nested configuration classes (like IdentityAdapterDefinition)
-     * that are used in List/array properties with indexed notation.
-     */
     private List<RenameResult> handleNestedConfigClass(String filePath, Map<String, String> mappings) {
         List<RenameResult> results = new ArrayList<>();
 
@@ -98,10 +82,6 @@ public class PropertyRenamer {
         return results;
     }
 
-    /**
-     * Handle files with @ConfigurationProperties annotation.
-     * This requires analyzing the class structure and renaming both the prefix and fields.
-     */
     private List<RenameResult> handleConfigurationPropertiesFile(String filePath,
                                                                   List<PropertyScanner.PropertyMatch> propertyMatches,
                                                                   Map<String, String> mappings) {
@@ -195,9 +175,6 @@ public class PropertyRenamer {
         return results;
     }
 
-    /**
-     * Handle regular files (non-ConfigurationProperties files)
-     */
     private List<RenameResult> handleRegularFile(String filePath,
                                                   List<PropertyScanner.PropertyMatch> propertyMatches,
                                                   Map<String, String> mappings) {
@@ -283,9 +260,6 @@ public class PropertyRenamer {
         return results;
     }
 
-    /**
-     * Handle .properties files
-     */
     private List<RenameResult> handlePropertiesFile(String filePath,
                                                      List<PropertyScanner.PropertyMatch> propertyMatches,
                                                      Map<String, String> mappings) {
@@ -392,10 +366,8 @@ public class PropertyRenamer {
     }
 
     private String extractPropertyKey(String fullProperty) {
-        // Trim first to remove any whitespace
         String trimmed = fullProperty.trim();
 
-        // Extract property key from ${property.name} or ${property.name:defaultValue}
         if (trimmed.startsWith("${") && trimmed.endsWith("}")) {
             String inner = trimmed.substring(2, trimmed.length() - 1);
             // Remove default value if present
@@ -411,9 +383,6 @@ public class PropertyRenamer {
         return trimmed;
     }
 
-    /**
-     * Applies replacement strategy based on the pattern type.
-     */
     private String replaceBasedOnPatternType(String content, String originalKey, String extractedKey,
                                             String newKey, String patternType) {
         switch (patternType) {
@@ -443,26 +412,17 @@ public class PropertyRenamer {
         }
     }
 
-    /**
-     * Replace in @Value annotation: @Value("${property.key}") or @Value("${property.key:default}")
-     * Handles multi-line annotations by replacing just the property key, preserving all formatting.
-     */
     private String replaceInValueAnnotation(String content, String originalKey, String extractedKey, String newKey) {
         // Handle ${property.key} format
         String trimmedKey = originalKey.trim();
         if (trimmedKey.startsWith("${") && trimmedKey.endsWith("}")) {
             // Check if it has a default value
             if (trimmedKey.contains(":")) {
-                // For properties with default values, replace the key part before the colon
-                // Use \\s* to handle optional whitespace around the property key
                 String regexPattern = "\\$\\{\\s*" + Pattern.quote(extractedKey) + "\\s*:";
                 String replacement = "\\${" + newKey + ":";
 
                 return content.replaceAll(regexPattern, replacement);
             } else {
-                // Simple property without default value
-                // Use word boundary or lookahead to match the property key followed by } (with possible text after })
-                // This handles cases like ${property.key} and ${property.key}-suffix
                 String regexPattern = "\\$\\{\\s*" + Pattern.quote(extractedKey) + "\\s*(?=\\})";
                 String replacement = "\\${" + newKey;
 
@@ -472,59 +432,36 @@ public class PropertyRenamer {
         return content;
     }
 
-    /**
-     * Replace in @ConfigurationProperty annotation: @ConfigurationProperty("property.key")
-     */
     private String replaceInConfigurationProperty(String content, String extractedKey, String newKey) {
-        // Match @ConfigurationProperty("oldKey") and replace with @ConfigurationProperty("newKey")
         String pattern = "@ConfigurationProperty\\s*\\(\\s*[\"']" + Pattern.quote(extractedKey) + "[\"']\\s*\\)";
         String replacement = "@ConfigurationProperty(\"" + newKey + "\")";
         return content.replaceAll(pattern, replacement);
     }
 
-    /**
-     * Replace in @ConfigurationProperties annotation: @ConfigurationProperties(prefix = "property.prefix")
-     */
     private String replaceInConfigurationProperties(String content, String extractedKey, String newKey) {
-        // Match @ConfigurationProperties(prefix = "oldKey") and replace with @ConfigurationProperties(prefix = "newKey")
         String pattern = "@ConfigurationProperties\\s*\\(\\s*prefix\\s*=\\s*[\"']" + Pattern.quote(extractedKey) + "[\"']\\s*\\)";
         String replacement = "@ConfigurationProperties(prefix = \"" + newKey + "\")";
         return content.replaceAll(pattern, replacement);
     }
 
-    /**
-     * Replace in Environment.getProperty(): env.getProperty("property.key")
-     */
     private String replaceInEnvironmentGetProperty(String content, String extractedKey, String newKey) {
-        // Match getProperty("oldKey") patterns (could be env.getProperty or environment.getProperty)
         String pattern = "getProperty\\s*\\(\\s*[\"']" + Pattern.quote(extractedKey) + "[\"']";
         String replacement = "getProperty(\"" + newKey + "\"";
         return content.replaceAll(pattern, replacement);
     }
 
-    /**
-     * Replace in System.getProperty(): System.getProperty("property.key")
-     */
     private String replaceInSystemGetProperty(String content, String extractedKey, String newKey) {
-        // Match System.getProperty("oldKey")
         String pattern = "System\\.getProperty\\s*\\(\\s*[\"']" + Pattern.quote(extractedKey) + "[\"']";
         String replacement = "System.getProperty(\"" + newKey + "\"";
         return content.replaceAll(pattern, replacement);
     }
 
-    /**
-     * Replace in @PropertySource annotation: @PropertySource("classpath:application.properties")
-     */
     private String replaceInPropertySource(String content, String extractedKey, String newKey) {
-        // Match @PropertySource("oldKey")
         String pattern = "@PropertySource\\s*\\(\\s*[\"']" + Pattern.quote(extractedKey) + "[\"']\\s*\\)";
         String replacement = "@PropertySource(\"" + newKey + "\")";
         return content.replaceAll(pattern, replacement);
     }
 
-    /**
-     * Replace in property placeholder: ${property.key} in strings or text
-     */
     private String replaceInPropertyPlaceholder(String content, String originalKey, String extractedKey, String newKey) {
         String trimmedKey = originalKey.trim();
         if (trimmedKey.startsWith("${") && trimmedKey.endsWith("}")) {
@@ -608,10 +545,9 @@ public class PropertyRenamer {
             String modifiedContent = content;
             boolean fileModified = false;
 
-            // For each field rename, update getter/setter calls
             for (Map.Entry<String, String> entry : fieldRenames.entrySet()) {
-                String key = entry.getKey(); // e.g., "IdentityAdapterDefinition.appId"
-                String newFieldName = entry.getValue(); // e.g., "appIds"
+                String key = entry.getKey();
+                String newFieldName = entry.getValue();
 
                 // Extract class name and old field name
                 String[] parts = key.split("\\.");
@@ -620,13 +556,11 @@ public class PropertyRenamer {
                 String className = parts[0];
                 String oldFieldName = parts[1];
 
-                // Generate getter/setter names
                 String oldGetter = "get" + capitalize(oldFieldName);
                 String newGetter = "get" + capitalize(newFieldName);
                 String oldSetter = "set" + capitalize(oldFieldName);
                 String newSetter = "set" + capitalize(newFieldName);
 
-                // Update getter calls: .getOldField( -> .getNewField(
                 String getterPattern = "\\." + Pattern.quote(oldGetter) + "(\\s*\\()";
                 String getterReplacement = "." + newGetter + "$1";
                 String updated = modifiedContent.replaceAll(getterPattern, getterReplacement);
@@ -644,7 +578,6 @@ public class PropertyRenamer {
                     ));
                 }
 
-                // Update setter calls: .setOldField( -> .setNewField(
                 String setterPattern = "\\." + Pattern.quote(oldSetter) + "(\\s*\\()";
                 String setterReplacement = "." + newSetter + "$1";
                 updated = modifiedContent.replaceAll(setterPattern, setterReplacement);
@@ -662,7 +595,6 @@ public class PropertyRenamer {
                     ));
                 }
 
-                // Handle boolean getters: .isOldField( -> .isNewField(
                 String oldIsGetter = "is" + capitalize(oldFieldName);
                 String newIsGetter = "is" + capitalize(newFieldName);
                 String isGetterPattern = "\\." + Pattern.quote(oldIsGetter) + "(\\s*\\()";
@@ -703,9 +635,9 @@ public class PropertyRenamer {
     }
 
     public enum RenameStatus {
-        RENAMED,        // Property was renamed
-        UNCHANGED,      // Mapping exists but old and new are the same
-        NO_MAPPING      // No mapping found for this property
+        RENAMED,
+        UNCHANGED,
+        NO_MAPPING
     }
 
     public static class RenameResult {

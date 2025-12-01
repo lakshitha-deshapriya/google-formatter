@@ -16,8 +16,6 @@ public class PropertyScanner {
 
     static {
         // @Value annotation patterns - supports multi-line with flexible whitespace
-        // Match content inside quotes, handling escaped characters including \"
-        // (?:[^"\\]|\\[\s\S])* matches: either non-quote-non-backslash, or backslash followed by any char
         PROPERTY_PATTERNS.add(Pattern.compile("@Value\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\[\\s\\S])*)\"\\s*\\)"));
 
         // @ConfigurationProperty annotation patterns
@@ -172,13 +170,9 @@ public class PropertyScanner {
         for (PropertyMatch match : matches) {
             boolean shouldAdd = true;
 
-            // If this is a placeholder pattern, check if there's an annotation/method pattern for same property
             if (match.patternType.equals("Property placeholder ${...}")) {
                 for (PropertyMatch other : matches) {
-                    // Check if there's a more specific pattern (annotation/method) on the same or nearby lines
                     if (!other.patternType.equals("Property placeholder ${...}")) {
-                        // Check if the placeholder property is contained within the annotation property
-                        // or if they're on the same line or within 5 lines of each other
                         boolean sameArea = Math.abs(other.lineNumber - match.lineNumber) <= 5;
                         boolean propertyContained = other.propertyKey.contains(match.propertyKey) ||
                                                    match.propertyKey.equals(extractPropertyKey(other.propertyKey));
@@ -199,9 +193,6 @@ public class PropertyScanner {
         return filtered;
     }
 
-    /**
-     * Scan .properties or .yml files for property keys
-     */
     private List<PropertyMatch> scanPropertiesFile(String filePath) {
         List<PropertyMatch> matches = new ArrayList<>();
         File file = new File(filePath);
@@ -260,7 +251,6 @@ public class PropertyScanner {
     }
 
     private String extractPropertyKey(String fullProperty) {
-        // Extract property key from ${property.name} or ${property.name:defaultValue}
         if (fullProperty.startsWith("${") && fullProperty.endsWith("}")) {
             String inner = fullProperty.substring(2, fullProperty.length() - 1);
             // Remove default value if present
