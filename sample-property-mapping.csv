@@ -7,4 +7,5 @@ java.io.tmpdir,java.io.tmpdirs
 identity.adapters[0].appId,identiti.adapter[0].appIds
 auto-generate-cif.enabled,auto.generate.cif.enabled
 kafka.topics.user-data-changed,kafka.topics.user-data-changed-topic
-
+identity-settings[0].entityId,identity.settings[0].entityIds
+mobile.country.whitelists[0].appId,mobile.country.whitelist[0].appIds

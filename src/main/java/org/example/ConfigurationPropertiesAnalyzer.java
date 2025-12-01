@@ -13,8 +13,14 @@ public class ConfigurationPropertiesAnalyzer {
         Pattern.DOTALL
     );
 
+    // Pattern for method-level @ConfigurationProperties (e.g., @Bean methods returning collections)
+    private static final Pattern METHOD_DECLARATION = Pattern.compile(
+        "@ConfigurationProperties\\s*\\(\\s*prefix\\s*=\\s*\"([^\"]+)\"\\s*\\)\\s*(?:.*?\\n)*?\\s*public\\s+(?:List|Set|Collection)<(\\w+)>\\s+(\\w+)\\s*\\(",
+        Pattern.DOTALL
+    );
+
     private static final Pattern FIELD_DECLARATION = Pattern.compile(
-        "^\\s*private\\s+([\\w<>\\[\\],\\s]+)\\s+(\\w+)\\s*(?:=.*)?;",
+        "^\\s*(?:@\\w+(?:\\s+@\\w+)*\\s+)?(private|public)\\s+([\\w<>\\[\\],\\s]+)\\s+(\\w+)\\s*(?:=.*)?;",
         Pattern.MULTILINE
     );
 
@@ -152,53 +158,72 @@ public class ConfigurationPropertiesAnalyzer {
         try {
             String content = readFileContent(new File(filePath));
 
-            // Find @ConfigurationProperties annotation and extract prefix
+            // First try to find @ConfigurationProperties on a class declaration
             Matcher classMatcher = CLASS_DECLARATION.matcher(content);
-            if (!classMatcher.find()) {
-                return null; // Not a @ConfigurationProperties class
+            if (classMatcher.find()) {
+                return analyzeClassLevelConfiguration(filePath, content, classMatcher, mappings);
             }
 
-            String prefix = classMatcher.group(1);
-            String className = classMatcher.group(2);
-            int prefixLineNumber = calculateLineNumber(content, classMatcher.start());
+            // If not found on class, try to find it on a method (e.g., @Bean method returning List<Type>)
+            Matcher methodMatcher = METHOD_DECLARATION.matcher(content);
+            if (methodMatcher.find()) {
+                return analyzeMethodLevelConfiguration(filePath, content, methodMatcher, mappings);
+            }
 
-            AnalysisResult result = new AnalysisResult(filePath, prefix, className, prefixLineNumber);
+            return null; // Not a @ConfigurationProperties class or method
 
-            // Identify the new prefix by analyzing property structure
-            mappings.entrySet().stream()
-                    .filter(
-                            entry ->
-                                    !entry.getKey().equalsIgnoreCase(entry.getValue())
-                                            && entry.getKey().startsWith(prefix))
-                    .findFirst()
-                    .ifPresent(
-                            entry -> {
-                                result.newPrefix = determineNewPrefix(
-                                        entry.getKey(),
-                                        entry.getValue(),
-                                        prefix
-                                );
-                                result.prefixChanged = !prefix.equals(result.newPrefix);
-                            });
+        } catch (IOException e) {
+            System.err.println("Error analyzing file: " + filePath + " - " + e.getMessage());
+            return null;
+        }
+    }
 
-            // Find the main class body boundaries
-            int classStartPos = classMatcher.end();
-            int classEndPos = findClassEnd(content, classStartPos);
-            String classBody = content.substring(classStartPos, classEndPos);
+    /**
+     * Analyze class-level @ConfigurationProperties (original behavior)
+     */
+    private AnalysisResult analyzeClassLevelConfiguration(String filePath, String content,
+                                                          Matcher classMatcher, Map<String, String> mappings) {
+        String prefix = classMatcher.group(1);
+        String className = classMatcher.group(2);
+        int prefixLineNumber = calculateLineNumber(content, classMatcher.start());
 
-            // Find all fields in the main class only (not in nested classes)
-            List<String> mainClassFields = extractMainClassFields(classBody);
+        AnalysisResult result = new AnalysisResult(filePath, prefix, className, prefixLineNumber);
 
-            int currentPos = classStartPos;
-            for (String fieldLine : mainClassFields) {
-                Matcher fieldMatcher = FIELD_DECLARATION.matcher(fieldLine);
-                if (fieldMatcher.find()) {
-                    String fieldType = fieldMatcher.group(1).trim();
-                    String fieldName = fieldMatcher.group(2);
+        // Identify the new prefix by analyzing property structure
+        mappings.entrySet().stream()
+                .filter(
+                        entry ->
+                                !entry.getKey().equalsIgnoreCase(entry.getValue())
+                                        && entry.getKey().startsWith(prefix))
+                .findFirst()
+                .ifPresent(
+                        entry -> {
+                            result.newPrefix = determineNewPrefix(
+                                    entry.getKey(),
+                                    entry.getValue(),
+                                    prefix
+                            );
+                            result.prefixChanged = !prefix.equals(result.newPrefix);
+                        });
 
-                    // Calculate line number relative to the original content
-                    int fieldPosInBody = classBody.indexOf(fieldLine);
-                    int absolutePos = classStartPos + fieldPosInBody;
+        // Find the main class body boundaries
+        int classStartPos = classMatcher.end();
+        int classEndPos = findClassEnd(content, classStartPos);
+        String classBody = content.substring(classStartPos, classEndPos);
+
+        // Find all fields in the main class only (not in nested classes)
+        List<String> mainClassFields = extractMainClassFields(classBody);
+
+        int currentPos = classStartPos;
+        for (String fieldLine : mainClassFields) {
+            Matcher fieldMatcher = FIELD_DECLARATION.matcher(fieldLine);
+            if (fieldMatcher.find()) {
+                String fieldType = fieldMatcher.group(2).trim(); // Group 2 is now the type
+                String fieldName = fieldMatcher.group(3); // Group 3 is now the field name
+
+                // Calculate line number relative to the original content
+                int fieldPosInBody = classBody.indexOf(fieldLine);
+                int absolutePos = classStartPos + fieldPosInBody;
                     int lineNumber = calculateLineNumber(content, absolutePos);
 
                     FieldInfo fieldInfo = new FieldInfo(fieldName, fieldType, lineNumber);
@@ -250,11 +275,47 @@ public class ConfigurationPropertiesAnalyzer {
             }
 
             return result;
+    }
 
-        } catch (IOException e) {
-            System.err.println("Error analyzing file: " + filePath + " - " + e.getMessage());
-            return null;
+    private AnalysisResult analyzeMethodLevelConfiguration(String filePath, String content,
+                                                           Matcher methodMatcher, Map<String, String> mappings) {
+        String prefix = methodMatcher.group(1);
+        String elementType = methodMatcher.group(2);  // e.g., "IdentitySettingProperties"
+        String methodName = methodMatcher.group(3);
+        int prefixLineNumber = calculateLineNumber(content, methodMatcher.start());
+
+        // Create an analysis result for the method-level configuration
+        AnalysisResult result = new AnalysisResult(filePath, prefix, elementType + " (method: " + methodName + ")", prefixLineNumber);
+
+        // Check if prefix needs to be changed
+        mappings.entrySet().stream()
+                .filter(entry -> !entry.getKey().equalsIgnoreCase(entry.getValue()) &&
+                               (entry.getKey().startsWith(prefix + ".") ||
+                                entry.getKey().startsWith(prefix + "[")))
+                .findFirst()
+                .ifPresent(entry -> {
+                    result.newPrefix = determineNewPrefixForIndexed(
+                            entry.getKey(),
+                            entry.getValue(),
+                            prefix
+                    );
+                    result.prefixChanged = !prefix.equals(result.newPrefix);
+                });
+
+        return result;
+    }
+
+    private String determineNewPrefixForIndexed(String oldProperty, String newProperty, String oldPrefix) {
+        // Extract prefix before the bracket or dot
+        String newPrefixPart;
+        if (newProperty.contains("[")) {
+            newPrefixPart = newProperty.substring(0, newProperty.indexOf('['));
+        } else if (newProperty.contains(".")) {
+            newPrefixPart = newProperty.substring(0, newProperty.indexOf('.'));
+        } else {
+            newPrefixPart = newProperty;
         }
+        return newPrefixPart;
     }
 
     public AnalysisResult analyzeNestedConfigClass(String filePath, Map<String, String> mappings) {
@@ -271,36 +332,49 @@ public class ConfigurationPropertiesAnalyzer {
             String className = classMatcher.group(1);
             int classLineNumber = calculateLineNumber(content, classMatcher.start());
 
-            // Check if this class is likely a nested configuration class referenced in indexed properties
-            // Strategy: Extract collection field names from indexed properties and see if class name relates
-            boolean hasRelevantMappings = false;
+            // Find the prefix that this class is associated with
+            // Strategy: Look for indexed property patterns that could reference this class
+            String matchedPrefix = null;
 
+            // Pattern 1: prefix.collection[0].field (e.g., identity.adapters[0].appId)
+            // Pattern 2: prefix[0].field (e.g., identity-settings[0].entityId)
             for (Map.Entry<String, String> mapping : mappings.entrySet()) {
                 String oldKey = mapping.getKey();
 
                 // Check if this is an indexed property mapping
                 if (oldKey.matches(".*\\[\\d+\\]\\.\\w+")) {
-                    // Extract the collection field name (e.g., "adapters" from "identity.adapters[0].appId")
-                    Pattern collectionPattern = Pattern.compile("\\.(\\w+)\\[\\d+\\]\\.");
-                    Matcher m = collectionPattern.matcher(oldKey);
+                    // Extract the full prefix before [0] including any dots
+                    Pattern prefixPattern = Pattern.compile("^(.+?)\\[\\d+\\]\\.");
+                    Matcher m = prefixPattern.matcher(oldKey);
 
                     if (m.find()) {
-                        String collectionFieldName = m.group(1); // e.g., "adapters"
+                        String fullPrefix = m.group(1); // e.g., "identity.adapters" or "identity-settings"
 
-                        // Check if class name is related to the collection field
-                        // Examples: "adapters" -> "Adapter" or "IdentityAdapterDefinition"
-                        // We look for the singular form of the collection name in the class name
-                        String singular = collectionFieldName.replaceAll("s$", ""); // simple plural -> singular
+                        // Extract the last part of the prefix (the collection/class identifier)
+                        String[] parts = fullPrefix.split("\\.");
+                        String prefixPart = parts[parts.length - 1]; // e.g., "adapters" or "identity-settings"
 
-                        if (className.toLowerCase().contains(singular.toLowerCase())) {
-                            hasRelevantMappings = true;
+                        // Check if class name is related to this prefix
+                        // Remove hyphens and convert to lower case for comparison
+                        String normalizedPrefix = prefixPart.replace("-", "").toLowerCase();
+                        String normalizedClassName = className.toLowerCase();
+
+                        // Check various matching strategies:
+                        // 1. Direct contains (e.g., "identitysettings" contains in "IdentitySettingProperties")
+                        // 2. Singular form (e.g., "adapter" in "IdentityAdapterDefinition")
+                        String singular = prefixPart.replaceAll("s$", "").replace("-", "").toLowerCase();
+
+                        if (normalizedClassName.contains(normalizedPrefix) ||
+                            normalizedClassName.contains(singular) ||
+                            normalizedPrefix.contains(normalizedClassName.replace("properties", ""))) {
+                            matchedPrefix = fullPrefix;
                             break;
                         }
                     }
                 }
             }
 
-            if (!hasRelevantMappings) {
+            if (matchedPrefix == null) {
                 // This class doesn't seem to be the nested type for any indexed property
                 return null;
             }
@@ -311,16 +385,21 @@ public class ConfigurationPropertiesAnalyzer {
             // Find all fields
             Matcher fieldMatcher = FIELD_DECLARATION.matcher(content);
             while (fieldMatcher.find()) {
-                String fieldType = fieldMatcher.group(1).trim();
-                String fieldName = fieldMatcher.group(2);
+                String fieldType = fieldMatcher.group(2).trim(); // Group 2 is the type
+                String fieldName = fieldMatcher.group(3); // Group 3 is the field name
                 int lineNumber = calculateLineNumber(content, fieldMatcher.start());
 
                 FieldInfo fieldInfo = new FieldInfo(fieldName, fieldType, lineNumber);
 
-                // Check mappings for indexed properties
+                // Check mappings for indexed properties ONLY for the matched prefix
                 for (Map.Entry<String, String> mapping : mappings.entrySet()) {
                     String oldKey = mapping.getKey();
                     String newKey = mapping.getValue();
+
+                    // Only process if this mapping belongs to the same prefix context
+                    if (!oldKey.startsWith(matchedPrefix + "[")) {
+                        continue;
+                    }
 
                     // Extract field name from indexed property (e.g., adapters[0].appId -> appId)
                     String extractedFieldName = extractFieldNameFromIndexedProperty(oldKey);
@@ -334,6 +413,7 @@ public class ConfigurationPropertiesAnalyzer {
                             fieldInfo.needsRename = true;
                             fieldInfo.fullPropertyPath = oldKey;
                         }
+                        break; // Found the mapping for this field, stop searching
                     }
                 }
 
@@ -586,14 +666,28 @@ public class ConfigurationPropertiesAnalyzer {
 
         int braceDepth = 0;
         boolean inNestedClass = false;
+        boolean nestedClassHasConfigProperties = false;
+        List<String> recentAnnotations = new ArrayList<>();
 
         for (String line : lines) {
             String trimmed = line.trim();
+
+            // Track annotations (they appear before class/field declarations)
+            if (trimmed.startsWith("@")) {
+                recentAnnotations.add(trimmed);
+            }
 
             // Track nested class/interface declarations
             if (trimmed.matches(".*\\b(class|interface|enum)\\s+\\w+.*")) {
                 inNestedClass = true;
                 braceDepth = 0;
+
+                // Check if any recent annotations include @ConfigurationProperties
+                nestedClassHasConfigProperties = recentAnnotations.stream()
+                    .anyMatch(ann -> ann.contains("@ConfigurationProperties"));
+
+                // Clear annotations after processing class declaration
+                recentAnnotations.clear();
             }
 
             // Count braces to track when we exit nested classes
@@ -603,13 +697,34 @@ public class ConfigurationPropertiesAnalyzer {
                     braceDepth--;
                     if (inNestedClass && braceDepth <= 0) {
                         inNestedClass = false;
+                        nestedClassHasConfigProperties = false;
                     }
                 }
             }
 
-            // Only capture field declarations when not in a nested class
-            if (!inNestedClass && trimmed.matches("^private\\s+[\\w<>\\[\\],\\s]+\\s+\\w+\\s*(?:=.*)?;.*")) {
-                fields.add(line);
+            // Capture field declarations with two patterns:
+            // 1. Standard: (private|public) Type fieldName;
+            // 2. With inline annotations: @Annotation (private|public) Type fieldName;
+            // Match field declarations that may have annotations on the same line
+            boolean isFieldDeclaration = trimmed.matches(".*\\b(private|public)\\s+[\\w<>\\[\\],\\s]+\\s+\\w+\\s*(?:=.*)?;.*");
+
+            if (isFieldDeclaration) {
+                // Capture fields from:
+                // 1. Main class (not in nested class)
+                // 2. Nested class with @ConfigurationProperties
+                if (!inNestedClass || nestedClassHasConfigProperties) {
+                    fields.add(line);
+                }
+                // Clear annotations after processing field
+                recentAnnotations.clear();
+            }
+
+            // Clear annotations on non-annotation, non-field lines (like method declarations)
+            if (!trimmed.startsWith("@") &&
+                !trimmed.isEmpty() &&
+                !isFieldDeclaration &&
+                !trimmed.matches(".*\\b(class|interface|enum)\\s+\\w+.*")) {
+                recentAnnotations.clear();
             }
         }
 
