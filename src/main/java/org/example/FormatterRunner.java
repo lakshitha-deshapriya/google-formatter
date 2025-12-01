@@ -9,7 +9,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-public class Runner {
+public class FormatterRunner {
 
     public void runFormatter(String[] args) throws InterruptedException {
         String baseProjFolder;

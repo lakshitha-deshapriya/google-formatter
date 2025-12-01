@@ -359,33 +359,29 @@ public class PropertyRenamer {
      * Replace in property placeholder: ${property.key} in strings or text
      */
     private String replaceInPropertyPlaceholder(String content, String originalKey, String extractedKey, String newKey) {
-        // Handle ${property.key} or ${property.key:defaultValue}
         String trimmedKey = originalKey.trim();
         if (trimmedKey.startsWith("${") && trimmedKey.endsWith("}")) {
             if (trimmedKey.contains(":")) {
-                // For properties with default values, replace just the key part before the colon
                 String regexPattern = "\\$\\{\\s*" + Pattern.quote(extractedKey) + "\\s*:";
                 String replacement = "\\${" + newKey + ":";
 
                 return content.replaceAll(regexPattern, replacement);
             } else {
-                // Replace ${oldKey} with ${newKey}
-                // Use lookahead to match the property key followed by } (with possible text after })
-                // This handles cases like ${property.key} and ${property.key}-suffix
                 String regexPattern = "\\$\\{\\s*" + Pattern.quote(extractedKey) + "\\s*(?=\\})";
                 String replacement = "\\${" + newKey;
 
                 return content.replaceAll(regexPattern, replacement);
             }
         } else if (trimmedKey.contains(":")) {
-            // Handle case where originalKey is like "property.key:defaultValue" without ${} delimiters
-            // This can happen in certain configuration formats
             String regexPattern = "\\b" + Pattern.quote(extractedKey) + "\\s*:";
             String replacement = newKey + ":";
 
             return content.replaceAll(regexPattern, replacement);
+        } else {
+            String regexPattern = "\\b" + Pattern.quote(extractedKey) + "\\b";
+
+            return content.replaceAll(regexPattern, newKey);
         }
-        return content;
     }
 
     private String readFileContent(File file) throws IOException {
