@@ -46,8 +46,6 @@ public class PropertyMappingReader {
                         return mappings;
                     }
 
-                    System.out.println("Found Old Property Key at column: " + (oldPropertyKeyIndex + 1));
-                    System.out.println("Found New Property Key at column: " + (newPropertyKeyIndex + 1));
                     continue;
                 }
 
@@ -61,7 +59,6 @@ public class PropertyMappingReader {
 
                     if (!oldKey.isEmpty() && !newKey.isEmpty()) {
                         mappings.put(oldKey, newKey);
-                        System.out.println("Mapping: " + oldKey + " -> " + newKey);
                     }
                 }
             }

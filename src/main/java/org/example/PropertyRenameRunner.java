@@ -151,6 +151,13 @@ public class PropertyRenameRunner {
                                              file.getName().endsWith(".properties") ||
                                              file.getName().endsWith(".yml") ||
                                              file.getName().endsWith(".yaml"))) {
+
+                    // Skip excluded files (api.yml and message property files)
+                    if (shouldExcludeFile(file)) {
+                        System.out.println("Skipping file: " + file.getName());
+                        continue;
+                    }
+
                     String absolutePath = file.getAbsolutePath();
                     allJavaFiles.add(absolutePath);
 
@@ -161,6 +168,21 @@ public class PropertyRenameRunner {
                 }
             }
         }
+    }
+
+    private boolean shouldExcludeFile(File file) {
+        String fileName = file.getName();
+
+        if ((fileName.endsWith("yml") || fileName.endsWith("yaml")) && !fileName.startsWith("application")) {
+            return true;
+        }
+
+        if (fileName.startsWith("message") &&
+            (fileName.endsWith(".properties") || fileName.endsWith(".yml") || fileName.endsWith(".yaml"))) {
+            return true;
+        }
+
+        return false;
     }
 
     private void generateSummaryReport(List<PropertyRenamer.RenameResult> results, String separator) {
@@ -199,12 +221,19 @@ public class PropertyRenameRunner {
             System.out.println(repeatString("-", 80));
 
             Map<String, List<PropertyRenamer.RenameResult>> groupedByFile = groupByFile(renamed);
-            for (Map.Entry<String, List<PropertyRenamer.RenameResult>> entry : groupedByFile.entrySet()) {
-                System.out.println("\nFile: " + entry.getKey());
+            for (Map.Entry<String, List<PropertyRenamer.RenameResult>> entry :
+                    groupedByFile.entrySet()) {
+                String[] fileParts = entry.getKey().split(File.separator);
+                String fileName = fileParts[fileParts.length - 1];
                 for (PropertyRenamer.RenameResult result : entry.getValue()) {
-                    System.out.println("  Line " + result.lineNumber + ": " +
-                                     result.oldKey + " → " + result.newKey +
-                                     " [" + result.patternType + "]");
+
+                    String fileDisplay = String.format("File: %-50s Line %4d: %s → %s [%s]",
+                            fileName,
+                            result.lineNumber,
+                            result.oldKey,
+                            result.newKey,
+                            result.patternType);
+                    System.out.println(fileDisplay);
                 }
             }
         }
@@ -217,10 +246,14 @@ public class PropertyRenameRunner {
 
             Map<String, List<PropertyRenamer.RenameResult>> groupedByFile = groupByFile(unchanged);
             for (Map.Entry<String, List<PropertyRenamer.RenameResult>> entry : groupedByFile.entrySet()) {
-                System.out.println("\nFile: " + entry.getKey());
+                String[] fileParts = entry.getKey().split(File.separator);
+                String fileName = fileParts[fileParts.length - 1];
                 for (PropertyRenamer.RenameResult result : entry.getValue()) {
-                    System.out.println("  Line " + result.lineNumber + ": " +
-                                     result.oldKey + " [" + result.patternType + "]");
+                    System.out.println(String.format("File: %-50s Line %4d: %s [%s]",
+                                     fileName,
+                                     result.lineNumber,
+                                     result.oldKey,
+                                     result.patternType));
                 }
             }
         }
@@ -233,10 +266,14 @@ public class PropertyRenameRunner {
 
             Map<String, List<PropertyRenamer.RenameResult>> groupedByFile = groupByFile(noMapping);
             for (Map.Entry<String, List<PropertyRenamer.RenameResult>> entry : groupedByFile.entrySet()) {
-                System.out.println("\nFile: " + entry.getKey());
+                String[] fileParts = entry.getKey().split(File.separator);
+                String fileName = fileParts[fileParts.length - 1];
                 for (PropertyRenamer.RenameResult result : entry.getValue()) {
-                    System.out.println("  Line " + result.lineNumber + ": " +
-                                     result.oldKey + " [" + result.patternType + "]");
+                    System.out.println(String.format("File: %-50s Line %4d: %s [%s]",
+                                     fileName,
+                                     result.lineNumber,
+                                     result.oldKey,
+                                     result.patternType));
                 }
             }
         }
