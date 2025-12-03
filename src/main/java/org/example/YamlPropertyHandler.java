@@ -221,9 +221,6 @@ public class YamlPropertyHandler {
             }
         }
         fullPath.append(".");
-        if (fullPath.length() > 0 && !fullPath.toString().endsWith("]")) {
-
-        }
         fullPath.append(key);
         return fullPath.toString();
     }
