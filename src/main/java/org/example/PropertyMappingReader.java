@@ -13,28 +13,55 @@ public class PropertyMappingReader {
 
         try (BufferedReader reader = new BufferedReader(new FileReader(csvFilePath))) {
             String line;
+            int oldPropertyKeyIndex = -1;
+            int newPropertyKeyIndex = -1;
             boolean firstLine = true;
 
             while ((line = reader.readLine()) != null) {
-                // Skip header line
-                if (firstLine) {
-                    firstLine = false;
-                    continue;
-                }
-
                 // Skip empty lines
                 if (line.trim().isEmpty()) {
                     continue;
                 }
 
-                // Parse CSV line
-                String[] parts = line.split(",", 2);
-                if (parts.length == 2) {
-                    String oldKey = parts[0].trim();
-                    String newKey = parts[1].trim();
+                // Parse header line to find column indices
+                if (firstLine) {
+                    firstLine = false;
+                    String[] headers = splitCSVLine(line);
+
+                    // Find the indices of "Old Property Key" and "New Property Key" columns
+                    for (int i = 0; i < headers.length; i++) {
+                        String header = headers[i].trim();
+                        if (header.equalsIgnoreCase("Old Property Key")) {
+                            oldPropertyKeyIndex = i;
+                        } else if (header.equalsIgnoreCase("New Property Key")) {
+                            newPropertyKeyIndex = i;
+                        }
+                    }
+
+                    // Validate that we found both columns
+                    if (oldPropertyKeyIndex == -1 || newPropertyKeyIndex == -1) {
+                        System.err.println("Error: CSV file must contain 'Old Property Key' and 'New Property Key' columns");
+                        System.err.println("Found Old Property Key at index: " + oldPropertyKeyIndex);
+                        System.err.println("Found New Property Key at index: " + newPropertyKeyIndex);
+                        return mappings;
+                    }
+
+                    System.out.println("Found Old Property Key at column: " + (oldPropertyKeyIndex + 1));
+                    System.out.println("Found New Property Key at column: " + (newPropertyKeyIndex + 1));
+                    continue;
+                }
+
+                // Parse data line
+                String[] parts = splitCSVLine(line);
+
+                // Extract values from the identified columns
+                if (parts.length > Math.max(oldPropertyKeyIndex, newPropertyKeyIndex)) {
+                    String oldKey = parts[oldPropertyKeyIndex].trim();
+                    String newKey = parts[newPropertyKeyIndex].trim();
 
                     if (!oldKey.isEmpty() && !newKey.isEmpty()) {
                         mappings.put(oldKey, newKey);
+                        System.out.println("Mapping: " + oldKey + " -> " + newKey);
                     }
                 }
             }
@@ -43,6 +70,13 @@ public class PropertyMappingReader {
         }
 
         return mappings;
+    }
+
+    /**
+     * Splits a CSV line handling basic tab-separated values
+     */
+    private String[] splitCSVLine(String line) {
+        return line.split(",");
     }
 }
 

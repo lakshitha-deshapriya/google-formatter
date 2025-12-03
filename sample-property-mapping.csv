@@ -1,4 +1,4 @@
-oldPropertyKey,newPropertyKey
+Old Property Key,New Property Key
 spring.application.name,spring.application.names
 validation.email.regex,validation.email.regexr
 membership-settings.max-members,membership.settings.maximum-members
