@@ -39,7 +39,7 @@
         <configuration>
           <archive>
             <manifest>
-              <mainClass>org.example.App</mainClass> <!-- Specify your main class here -->
+              <mainClass>org.example.App</mainClass> <!-- Default main class for backward compatibility -->
               <addClasspath>true</addClasspath>
               <classpathPrefix>lib/</classpathPrefix>
               <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
@@ -47,6 +47,54 @@
             </manifest>
           </archive>
         </configuration>
+      </plugin>
+      <!-- Maven Assembly Plugin to create multiple executable JARs -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-assembly-plugin</artifactId>
+        <version>3.3.0</version>
+        <executions>
+          <!-- Formatter executable -->
+          <execution>
+            <id>formatter</id>
+            <phase>package</phase>
+            <goals>
+              <goal>single</goal>
+            </goals>
+            <configuration>
+              <archive>
+                <manifest>
+                  <mainClass>org.example.FormatterApp</mainClass>
+                </manifest>
+              </archive>
+              <descriptorRefs>
+                <descriptorRef>jar-with-dependencies</descriptorRef>
+              </descriptorRefs>
+              <finalName>google-formatter</finalName>
+              <attach>false</attach>
+            </configuration>
+          </execution>
+          <!-- Property Renamer executable -->
+          <execution>
+            <id>property-renamer</id>
+            <phase>package</phase>
+            <goals>
+              <goal>single</goal>
+            </goals>
+            <configuration>
+              <archive>
+                <manifest>
+                  <mainClass>org.example.PropertyRenamerApp</mainClass>
+                </manifest>
+              </archive>
+              <descriptorRefs>
+                <descriptorRef>jar-with-dependencies</descriptorRef>
+              </descriptorRefs>
+              <finalName>property-renamer</finalName>
+              <attach>false</attach>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>
