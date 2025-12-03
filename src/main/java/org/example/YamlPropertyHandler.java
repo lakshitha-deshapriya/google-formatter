@@ -7,9 +7,6 @@ import java.util.*;
 
 public class YamlPropertyHandler {
 
-    /**
-     * Scans a YAML file and returns property matches with full dot-notation paths
-     */
     public List<PropertyScanner.PropertyMatch> scanYamlFile(String filePath) {
         List<PropertyScanner.PropertyMatch> matches = new ArrayList<>();
 
@@ -29,9 +26,6 @@ public class YamlPropertyHandler {
         return matches;
     }
 
-    /**
-     * Recursively extract properties from YAML structure
-     */
     private void extractProperties(Map<String, Object> map, String prefix,
                                    List<PropertyScanner.PropertyMatch> matches, String filePath) {
         for (Map.Entry<String, Object> entry : map.entrySet()) {
@@ -76,9 +70,6 @@ public class YamlPropertyHandler {
         }
     }
 
-    /**
-     * Scans YAML file with line number tracking using a custom approach
-     */
     public List<PropertyScanner.PropertyMatch> scanYamlFileWithLineNumbers(String filePath) {
         List<PropertyScanner.PropertyMatch> matches = new ArrayList<>();
         Map<String, Integer> propertyLineMap = new HashMap<>();
@@ -205,9 +196,6 @@ public class YamlPropertyHandler {
         return matches;
     }
 
-    /**
-     * Helper method to build full path from stack
-     */
     private String buildPath(Stack<String> pathStack, String key) {
         StringBuilder fullPath = new StringBuilder();
         for (String part : pathStack) {
@@ -223,9 +211,6 @@ public class YamlPropertyHandler {
         return fullPath.append(".").append(key).toString();
     }
 
-    /**
-     * Helper method to extract the new key from a property path
-     */
     private String extractNewKey(String newPropertyPath) {
         // Remove any trailing array notation
         String pathWithoutArraySuffix = newPropertyPath;
@@ -246,6 +231,60 @@ public class YamlPropertyHandler {
             return newPropertyPath.substring(lastDotIndex + 1);
         }
         return newPropertyPath;
+    }
+
+
+    private String findNewKeyForPath(String fullPath, String currentKey, Map<String, String> mappings) {
+        // First, check for exact match
+        if (mappings.containsKey(fullPath)) {
+            String newPropertyPath = mappings.get(fullPath);
+            String newKey = extractNewKey(newPropertyPath);
+            return newKey;
+        }
+
+        for (Map.Entry<String, String> mapping : mappings.entrySet()) {
+            String oldPath = mapping.getKey();
+            String newPath = mapping.getValue();
+
+            // Check if the old path starts with our full path followed by [ or .
+            if (oldPath.startsWith(fullPath + "[") || oldPath.startsWith(fullPath + ".") || oldPath.equals(fullPath)) {
+                List<String> oldSegments = parsePathSegments(oldPath);
+                List<String> newSegments = parsePathSegments(newPath);
+                List<String> currentSegments = parsePathSegments(fullPath);
+
+                // Find the segment index for the current key
+                int segmentIndex = -1;
+                for (int i = 0; i < currentSegments.size(); i++) {
+                    if (currentSegments.get(i).equals(currentKey)) {
+                        segmentIndex = i;
+                        break;
+                    }
+                }
+
+                // Get the corresponding new segment
+                if (segmentIndex >= 0 && segmentIndex < newSegments.size()) {
+                    String newSegment = newSegments.get(segmentIndex);
+                    if (!newSegment.isEmpty() && !newSegment.equals(currentKey) && !newSegment.startsWith("[")) {
+                        return newSegment;
+                    }
+                }
+            }
+        }
+
+        return currentKey; // No change needed
+    }
+
+    private List<String> parsePathSegments(String path) {
+        List<String> segments = new ArrayList<>();
+        // Remove array indices and split by dots
+        String pathWithoutArrays = path.replaceAll("\\[\\d+\\]", "");
+        String[] parts = pathWithoutArrays.split("\\.");
+        for (String part : parts) {
+            if (!part.isEmpty()) {
+                segments.add(part);
+            }
+        }
+        return segments;
     }
 
     private void extractPropertiesWithLineNumbers(Map<String, Object> map, String prefix,
@@ -297,9 +336,6 @@ public class YamlPropertyHandler {
         }
     }
 
-    /**
-     * Rename properties in a YAML file
-     */
     public boolean renamePropertiesInYaml(String filePath, Map<String, String> mappings) {
         try {
             // Read all lines
@@ -370,23 +406,18 @@ public class YamlPropertyHandler {
                         // Build full path
                         String fullPath = buildPath(pathStack, key);
 
-                        // Check if we need to rename this property
-                        if (mappings.containsKey(fullPath)) {
-                            String newPropertyPath = mappings.get(fullPath);
+                        // Find the new key name (checks both exact and prefix matches)
+                        String newKey = findNewKeyForPath(fullPath, key, mappings);
 
-                            // Extract the new key (last part after the last dot)
-                            String newKey = extractNewKey(newPropertyPath);
-
-                            // Only rename if the key actually changed
-                            if (!key.equals(newKey)) {
-                                // Replace the key in the line while preserving indentation and value
-                                int keyStartInLine = line.indexOf(key, line.indexOf("-") + 1);
-                                if (keyStartInLine > 0) {
-                                    String beforeKey = line.substring(0, keyStartInLine);
-                                    String afterKey = line.substring(keyStartInLine + key.length());
-                                    lines.set(i, beforeKey + newKey + afterKey);
-                                    modified = true;
-                                }
+                        // Only rename if the key actually changed
+                        if (!key.equals(newKey)) {
+                            // Replace the key in the line while preserving indentation and value
+                            int keyStartInLine = line.indexOf(key, line.indexOf("-") + 1);
+                            if (keyStartInLine > 0) {
+                                String beforeKey = line.substring(0, keyStartInLine);
+                                String afterKey = line.substring(keyStartInLine + key.length());
+                                lines.set(i, beforeKey + newKey + afterKey);
+                                modified = true;
                             }
                         }
 
@@ -394,7 +425,7 @@ public class YamlPropertyHandler {
                         String afterColon = content.substring(colonIndex + 1).trim();
                         if (afterColon.isEmpty() || afterColon.startsWith("#")) {
                             // No value, this is a parent key
-                            pathStack.push(key);
+                            pathStack.push(key); // Push the ORIGINAL key name to the stack (for matching mappings)
                             indentStack.push(indent + 2); // Account for "- " offset
                         }
                     }
@@ -408,23 +439,18 @@ public class YamlPropertyHandler {
                         // Build full path
                         String fullPath = buildPath(pathStack, key);
 
-                        // Check if we need to rename this property
-                        if (mappings.containsKey(fullPath)) {
-                            String newPropertyPath = mappings.get(fullPath);
+                        // Find the new key name (checks both exact and prefix matches)
+                        String newKey = findNewKeyForPath(fullPath, key, mappings);
 
-                            // Extract the new key (last part after the last dot)
-                            String newKey = extractNewKey(newPropertyPath);
-
-                            // Only rename if the key actually changed
-                            if (!key.equals(newKey)) {
-                                // Replace the key in the line while preserving indentation and value
-                                int keyStartInLine = line.indexOf(key);
-                                if (keyStartInLine >= 0) {
-                                    String beforeKey = line.substring(0, keyStartInLine);
-                                    String afterKey = line.substring(keyStartInLine + key.length());
-                                    lines.set(i, beforeKey + newKey + afterKey);
-                                    modified = true;
-                                }
+                        // Only rename if the key actually changed
+                        if (!key.equals(newKey)) {
+                            // Replace the key in the line while preserving indentation and value
+                            int keyStartInLine = line.indexOf(key);
+                            if (keyStartInLine >= 0) {
+                                String beforeKey = line.substring(0, keyStartInLine);
+                                String afterKey = line.substring(keyStartInLine + key.length());
+                                lines.set(i, beforeKey + newKey + afterKey);
+                                modified = true;
                             }
                         }
 
@@ -432,7 +458,7 @@ public class YamlPropertyHandler {
                         String afterColon = trimmed.substring(colonIndex + 1).trim();
                         if (afterColon.isEmpty() || afterColon.startsWith("#")) {
                             // No value, this is a parent key
-                            pathStack.push(key);
+                            pathStack.push(key); // Push the ORIGINAL key name to the stack (for matching mappings)
                             indentStack.push(indent);
                         }
                     }
