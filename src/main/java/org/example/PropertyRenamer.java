@@ -175,6 +175,66 @@ public class PropertyRenamer {
         return results;
     }
 
+    private List<RenameResult> handleYamlFile(String filePath,
+                                               List<PropertyScanner.PropertyMatch> propertyMatches,
+                                               Map<String, String> mappings) {
+        List<RenameResult> results = new ArrayList<>();
+
+        try {
+            YamlPropertyHandler yamlHandler = new YamlPropertyHandler();
+
+            // Track which properties will be renamed
+            boolean hasChanges = false;
+            for (PropertyScanner.PropertyMatch match : propertyMatches) {
+                String oldKey = match.propertyKey;
+
+                if (mappings.containsKey(oldKey)) {
+                    String newKey = mappings.get(oldKey);
+
+                    if (oldKey.equals(newKey)) {
+                        results.add(new RenameResult(
+                            filePath,
+                            match.lineNumber,
+                            oldKey,
+                            newKey,
+                            RenameStatus.UNCHANGED,
+                            match.patternType
+                        ));
+                    } else {
+                        hasChanges = true;
+                        results.add(new RenameResult(
+                            filePath,
+                            match.lineNumber,
+                            oldKey,
+                            newKey,
+                            RenameStatus.RENAMED,
+                            match.patternType
+                        ));
+                    }
+                } else {
+                    results.add(new RenameResult(
+                        filePath,
+                        match.lineNumber,
+                        oldKey,
+                        null,
+                        RenameStatus.NO_MAPPING,
+                        match.patternType
+                    ));
+                }
+            }
+
+            // Apply changes if needed
+            if (hasChanges) {
+                yamlHandler.renamePropertiesInYaml(filePath, mappings);
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error processing YAML file: " + filePath + " - " + e.getMessage());
+        }
+
+        return results;
+    }
+
     private List<RenameResult> handleRegularFile(String filePath,
                                                   List<PropertyScanner.PropertyMatch> propertyMatches,
                                                   Map<String, String> mappings) {
@@ -264,6 +324,11 @@ public class PropertyRenamer {
                                                      List<PropertyScanner.PropertyMatch> propertyMatches,
                                                      Map<String, String> mappings) {
         List<RenameResult> results = new ArrayList<>();
+
+        // Check if this is a YAML file
+        if (filePath.endsWith(".yml") || filePath.endsWith(".yaml")) {
+            return handleYamlFile(filePath, propertyMatches, mappings);
+        }
 
         try {
             File file = new File(filePath);

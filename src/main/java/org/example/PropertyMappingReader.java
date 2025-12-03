@@ -41,8 +41,6 @@ public class PropertyMappingReader {
                     // Validate that we found both columns
                     if (oldPropertyKeyIndex == -1 || newPropertyKeyIndex == -1) {
                         System.err.println("Error: CSV file must contain 'Old Property Key' and 'New Property Key' columns");
-                        System.err.println("Found Old Property Key at index: " + oldPropertyKeyIndex);
-                        System.err.println("Found New Property Key at index: " + newPropertyKeyIndex);
                         return mappings;
                     }
 

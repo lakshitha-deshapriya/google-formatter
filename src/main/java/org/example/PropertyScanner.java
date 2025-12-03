@@ -45,8 +45,26 @@ public class PropertyScanner {
             return new ArrayList<>();
         }
 
-        // Check if it's a .properties or .yml file
-        if (filePath.endsWith(".properties") || filePath.endsWith(".yml") || filePath.endsWith(".yaml")) {
+        // Check if it's a YAML file
+        if (filePath.endsWith(".yml") || filePath.endsWith(".yaml")) {
+            YamlPropertyHandler yamlHandler = new YamlPropertyHandler();
+            List<PropertyMatch> matches = yamlHandler.scanYamlFileWithLineNumbers(filePath);
+
+            // Print results for this file (only if not in silent mode)
+            if (!silentMode && !matches.isEmpty()) {
+                System.out.println(filePath);
+                for (PropertyMatch match : matches) {
+                    System.out.println("Line: " + match.lineNumber +
+                                     ", Property: " + match.propertyKey);
+                }
+                System.out.println();
+            }
+
+            return matches;
+        }
+
+        // Check if it's a .properties file
+        if (filePath.endsWith(".properties")) {
             return scanPropertiesFile(filePath);
         }
 
