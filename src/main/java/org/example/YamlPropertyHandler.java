@@ -220,9 +220,7 @@ public class YamlPropertyHandler {
                 fullPath.append(part);
             }
         }
-        fullPath.append(".");
-        fullPath.append(key);
-        return fullPath.toString();
+        return fullPath.append(".").append(key).toString();
     }
 
     /**
