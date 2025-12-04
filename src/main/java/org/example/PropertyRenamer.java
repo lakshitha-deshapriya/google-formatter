@@ -605,87 +605,31 @@ public class PropertyRenamer {
         }
 
         try {
-            File file = new File(filePath);
-            String content = readFileContent(file);
-            String modifiedContent = content;
-            boolean fileModified = false;
+            // Use JavaParser-based implementation from ConfigurationPropertiesAnalyzer
+            boolean wasModified = configPropertiesAnalyzer.updateAccessorCallsInFile(filePath, fieldRenames);
 
-            for (Map.Entry<String, String> entry : fieldRenames.entrySet()) {
-                String key = entry.getKey();
-                String newFieldName = entry.getValue();
+            if (wasModified) {
+                for (Map.Entry<String, String> entry : fieldRenames.entrySet()) {
+                    String key = entry.getKey();
+                    String newFieldName = entry.getValue();
 
-                // Extract class name and old field name
-                String[] parts = key.split("\\.");
-                if (parts.length != 2) continue;
+                    String[] parts = key.split("\\.");
+                    if (parts.length != 2) continue;
 
-                String className = parts[0];
-                String oldFieldName = parts[1];
+                    String className = parts[0];
+                    String oldFieldName = parts[1];
 
-                String oldGetter = "get" + capitalize(oldFieldName);
-                String newGetter = "get" + capitalize(newFieldName);
-                String oldSetter = "set" + capitalize(oldFieldName);
-                String newSetter = "set" + capitalize(newFieldName);
-
-                String getterPattern = "\\." + Pattern.quote(oldGetter) + "(\\s*\\()";
-                String getterReplacement = "." + newGetter + "$1";
-                String updated = modifiedContent.replaceAll(getterPattern, getterReplacement);
-
-                if (!updated.equals(modifiedContent)) {
-                    modifiedContent = updated;
-                    fileModified = true;
                     results.add(new RenameResult(
                         filePath,
                         -1,
-                        className + "." + oldGetter + "()",
-                        className + "." + newGetter + "()",
+                        className + "." + oldFieldName,
+                        className + "." + newFieldName,
                         RenameStatus.RENAMED,
-                        "Getter call update"
-                    ));
-                }
-
-                String setterPattern = "\\." + Pattern.quote(oldSetter) + "(\\s*\\()";
-                String setterReplacement = "." + newSetter + "$1";
-                updated = modifiedContent.replaceAll(setterPattern, setterReplacement);
-
-                if (!updated.equals(modifiedContent)) {
-                    modifiedContent = updated;
-                    fileModified = true;
-                    results.add(new RenameResult(
-                        filePath,
-                        -1,
-                        className + "." + oldSetter + "()",
-                        className + "." + newSetter + "()",
-                        RenameStatus.RENAMED,
-                        "Setter call update"
-                    ));
-                }
-
-                String oldIsGetter = "is" + capitalize(oldFieldName);
-                String newIsGetter = "is" + capitalize(newFieldName);
-                String isGetterPattern = "\\." + Pattern.quote(oldIsGetter) + "(\\s*\\()";
-                String isGetterReplacement = "." + newIsGetter + "$1";
-                updated = modifiedContent.replaceAll(isGetterPattern, isGetterReplacement);
-
-                if (!updated.equals(modifiedContent)) {
-                    modifiedContent = updated;
-                    fileModified = true;
-                    results.add(new RenameResult(
-                        filePath,
-                        -1,
-                        className + "." + oldIsGetter + "()",
-                        className + "." + newIsGetter + "()",
-                        RenameStatus.RENAMED,
-                        "Boolean getter call update"
+                        "Accessor calls updated (getter/setter)"
                     ));
                 }
             }
-
-            // Write changes if anything was modified
-            if (fileModified) {
-                writeFileContent(file, modifiedContent);
-            }
-
-        } catch (IOException e) {
+        } catch (Exception e) {
             System.err.println("Error updating getter/setter calls in file: " + filePath + " - " + e.getMessage());
         }
 

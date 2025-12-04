@@ -10,7 +10,7 @@ public class PropertyRenamerApp {
         System.out.println();
 
         PropertyRenameRunner propertyRenameRunner = new PropertyRenameRunner();
-        propertyRenameRunner.runPropertyRename(args, false);
+        propertyRenameRunner.runPropertyRename(args, true);
     }
 
     private static String repeatString(String str, int count) {
