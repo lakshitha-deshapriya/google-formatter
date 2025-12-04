@@ -186,12 +186,24 @@ public class PropertyRenameRunner {
     }
 
     private void generateSummaryReport(List<PropertyRenamer.RenameResult> results, String separator) {
-        // Categorize results
+        // Separate field changes from property changes
+        List<PropertyRenamer.RenameResult> fieldChanges = new ArrayList<>();
+        List<PropertyRenamer.RenameResult> propertyResults = new ArrayList<>();
+
+        for (PropertyRenamer.RenameResult result : results) {
+            if (isFieldChange(result)) {
+                fieldChanges.add(result);
+            } else {
+                propertyResults.add(result);
+            }
+        }
+
+        // Categorize property results (excluding field changes)
         List<PropertyRenamer.RenameResult> renamed = new ArrayList<>();
         List<PropertyRenamer.RenameResult> unchanged = new ArrayList<>();
         List<PropertyRenamer.RenameResult> noMapping = new ArrayList<>();
 
-        for (PropertyRenamer.RenameResult result : results) {
+        for (PropertyRenamer.RenameResult result : propertyResults) {
             switch (result.status) {
                 case RENAMED:
                     renamed.add(result);
@@ -208,10 +220,13 @@ public class PropertyRenameRunner {
         System.out.println("\n" + separator);
         System.out.println("PROPERTY RENAME SUMMARY");
         System.out.println(separator);
-        System.out.println("Total properties processed: " + results.size());
+        System.out.println("Total properties processed: " + propertyResults.size());
         System.out.println("  - Renamed: " + renamed.size());
         System.out.println("  - Unchanged (mapping exists, same value): " + unchanged.size());
         System.out.println("  - No mapping found: " + noMapping.size());
+        if (!fieldChanges.isEmpty()) {
+            System.out.println("\nTotal field changes: " + fieldChanges.size());
+        }
         System.out.println(separator);
 
         // Print renamed properties
@@ -258,6 +273,35 @@ public class PropertyRenameRunner {
             }
         }
 
+        // Print field changes
+        if (!fieldChanges.isEmpty()) {
+            System.out.println("\n" + repeatString("-", 80));
+            System.out.println("FIELD CHANGES (" + fieldChanges.size() + ")");
+            System.out.println(repeatString("-", 80));
+
+            Map<String, List<PropertyRenamer.RenameResult>> groupedByFile = groupByFile(fieldChanges);
+            for (Map.Entry<String, List<PropertyRenamer.RenameResult>> entry : groupedByFile.entrySet()) {
+                String[] fileParts = entry.getKey().split(File.separator);
+                String fileName = fileParts[fileParts.length - 1];
+                for (PropertyRenamer.RenameResult result : entry.getValue()) {
+                    if (result.status == PropertyRenamer.RenameStatus.RENAMED) {
+                        System.out.println(String.format("File: %-50s Line %4d: %s → %s [%s]",
+                                         fileName,
+                                         result.lineNumber > 0 ? result.lineNumber : 0,
+                                         result.oldKey,
+                                         result.newKey,
+                                         result.patternType));
+                    } else {
+                        System.out.println(String.format("File: %-50s Line %4d: %s [%s]",
+                                         fileName,
+                                         result.lineNumber > 0 ? result.lineNumber : 0,
+                                         result.oldKey,
+                                         result.patternType));
+                    }
+                }
+            }
+        }
+
         // Print properties without mapping
         if (!noMapping.isEmpty()) {
             System.out.println("\n" + repeatString("-", 80));
@@ -281,6 +325,15 @@ public class PropertyRenameRunner {
         System.out.println("\n" + separator);
         System.out.println("Property renaming completed!");
         System.out.println(separator);
+    }
+
+    private boolean isFieldChange(PropertyRenamer.RenameResult result) {
+        // Field changes have specific pattern types
+        return result.patternType != null && (
+            result.patternType.startsWith("ConfigurationProperties field") ||
+            result.patternType.contains("Nested configuration field") ||
+            result.patternType.contains("Accessor calls updated")
+        );
     }
 
     private Map<String, List<PropertyRenamer.RenameResult>> groupByFile(List<PropertyRenamer.RenameResult> results) {
