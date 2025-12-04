@@ -177,24 +177,19 @@ public class PropertyRenameRunner {
         for (PropertyRenamer.RenameResult result : results) {
             if (result.status == PropertyRenamer.RenameStatus.RENAMED) {
                 // Track renames from ConfigurationProperties fields
-                if (result.patternType != null && result.patternType.startsWith("ConfigurationProperties field")) {
-                    // Extract old field name from pattern type - format: "ConfigurationProperties field (oldFieldName)"
-                    int startIdx = result.patternType.indexOf('(');
-                    int endIdx = result.patternType.indexOf(')');
-                    if (startIdx != -1 && endIdx != -1) {
-                        String oldFieldName = result.patternType.substring(startIdx + 1, endIdx);
-                        String key = className + "." + oldFieldName;
+                if (result.patternType == PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_FIELD) {
+                    String oldFieldName = result.extraInfo;
+                    String key = className + "." + oldFieldName;
 
-                        // Extract the new field name from the property paths
-                        // For both simple and collection fields
-                        String newFieldName = extractNewFieldName(result.oldKey, result.newKey);
-                        if (newFieldName != null && !newFieldName.equals(oldFieldName)) {
-                            fieldRenames.put(key, newFieldName);
-                        }
+                    // Extract the new field name from the property paths
+                    // For both simple and collection fields
+                    String newFieldName = extractNewFieldName(result.oldKey, result.newKey);
+                    if (newFieldName != null && !newFieldName.equals(oldFieldName)) {
+                        fieldRenames.put(key, newFieldName);
                     }
                 }
                 // Track renames from nested configuration fields
-                else if (result.patternType != null && result.patternType.contains("Nested configuration field")) {
+                else if (result.patternType == PropertyScanner.PatternType.NESTED_CONFIGURATION_FIELD) {
                     String key = className + "." + result.oldKey;
                     fieldRenames.put(key, result.newKey);
                 }
@@ -369,7 +364,7 @@ public class PropertyRenameRunner {
                             result.lineNumber,
                             result.oldKey,
                             result.newKey,
-                            result.patternType);
+                            result.getPatternDescription());
                     System.out.println(fileDisplay);
                 }
             }
@@ -390,7 +385,7 @@ public class PropertyRenameRunner {
                                      fileName,
                                      result.lineNumber,
                                      result.oldKey,
-                                     result.patternType));
+                                     result.getPatternDescription()));
                 }
             }
         }
@@ -412,13 +407,13 @@ public class PropertyRenameRunner {
                                          result.lineNumber > 0 ? result.lineNumber : 0,
                                          result.oldKey,
                                          result.newKey,
-                                         result.patternType));
+                                         result.getPatternDescription()));
                     } else {
                         System.out.println(String.format("File: %-50s Line %4d: %s [%s]",
                                          fileName,
                                          result.lineNumber > 0 ? result.lineNumber : 0,
                                          result.oldKey,
-                                         result.patternType));
+                                         result.getPatternDescription()));
                     }
                 }
             }
@@ -439,7 +434,7 @@ public class PropertyRenameRunner {
                                      fileName,
                                      result.lineNumber,
                                      result.oldKey,
-                                     result.patternType));
+                                     result.getPatternDescription()));
                 }
             }
         }
@@ -451,11 +446,9 @@ public class PropertyRenameRunner {
 
     private boolean isFieldChange(PropertyRenamer.RenameResult result) {
         // Field changes have specific pattern types
-        return result.patternType != null && (
-            result.patternType.startsWith("ConfigurationProperties field") ||
-            result.patternType.contains("Nested configuration field") ||
-            result.patternType.contains("Accessor calls updated")
-        );
+        return result.patternType == PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_FIELD ||
+               result.patternType == PropertyScanner.PatternType.NESTED_CONFIGURATION_FIELD ||
+               result.patternType == PropertyScanner.PatternType.ACCESSOR_CALLS;
     }
 
     private Map<String, List<PropertyRenamer.RenameResult>> groupByFile(List<PropertyRenamer.RenameResult> results) {
@@ -470,4 +463,3 @@ public class PropertyRenameRunner {
         return String.valueOf(str).repeat(Math.max(0, count));
     }
 }
-

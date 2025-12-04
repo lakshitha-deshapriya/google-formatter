@@ -85,7 +85,7 @@ public class PropertyScanner {
 
             // Process multi-line patterns (annotations that might span multiple lines)
             for (Pattern pattern : PROPERTY_PATTERNS) {
-                String patternType = getPatternType(pattern);
+                PatternType patternType = getPatternType(pattern);
 
                 // For annotations, use DOTALL flag to match across newlines
                 Pattern multiLinePattern = Pattern.compile(pattern.pattern(), Pattern.DOTALL);
@@ -129,7 +129,7 @@ public class PropertyScanner {
 
             for (PropertyMatch match : matches) {
                 System.out.println("Line: " + match.lineNumber +
-                                 ", Usage: " + match.patternType +
+                                 ", Usage: " + match.patternType.getDisplayName() +
                                  ", Property: " + match.propertyKey);
             }
             System.out.println();
@@ -138,27 +138,27 @@ public class PropertyScanner {
         return matches;
     }
 
-    private String getPatternType(Pattern pattern) {
+    private PatternType getPatternType(Pattern pattern) {
         String patternStr = pattern.pattern();
 
         if (patternStr.contains("@Value")) {
-            return "@Value annotation";
+            return PatternType.VALUE_ANNOTATION;
         } else if (patternStr.contains("@ConfigurationProperty\\s*\\(")) {
-            return "@ConfigurationProperty annotation";
+            return PatternType.CONFIGURATION_PROPERTY_ANNOTATION;
         } else if (patternStr.contains("@ConfigurationProperties")) {
-            return "@ConfigurationProperties annotation (prefix)";
+            return PatternType.CONFIGURATION_PROPERTIES_PREFIX;
         } else if (patternStr.contains("getProperty")) {
             if (patternStr.contains("System")) {
-                return "System.getProperty()";
+                return PatternType.SYSTEM_GET_PROPERTY;
             }
-            return "Environment.getProperty()";
+            return PatternType.ENVIRONMENT_GET_PROPERTY;
         } else if (patternStr.contains("@PropertySource")) {
-            return "@PropertySource annotation";
+            return PatternType.PROPERTY_SOURCE_ANNOTATION;
         } else if (patternStr.contains("\\$\\{")) {
-            return "Property placeholder ${...}";
+            return PatternType.PROPERTY_PLACEHOLDER;
         }
 
-        return "Unknown pattern";
+        return PatternType.UNKNOWN;
     }
 
     private int calculateLineNumber(String content, int position) {
@@ -175,7 +175,7 @@ public class PropertyScanner {
         for (PropertyMatch existing : matches) {
             if (existing.lineNumber == newMatch.lineNumber &&
                 existing.propertyKey.equals(newMatch.propertyKey) &&
-                existing.patternType.equals(newMatch.patternType)) {
+                existing.patternType == newMatch.patternType) {
                 return true;
             }
         }
@@ -188,9 +188,9 @@ public class PropertyScanner {
         for (PropertyMatch match : matches) {
             boolean shouldAdd = true;
 
-            if (match.patternType.equals("Property placeholder ${...}")) {
+            if (match.patternType == PatternType.PROPERTY_PLACEHOLDER) {
                 for (PropertyMatch other : matches) {
-                    if (!other.patternType.equals("Property placeholder ${...}")) {
+                    if (other.patternType != PatternType.PROPERTY_PLACEHOLDER) {
                         boolean sameArea = Math.abs(other.lineNumber - match.lineNumber) <= 5;
                         boolean propertyContained = other.propertyKey.contains(match.propertyKey) ||
                                                    match.propertyKey.equals(extractPropertyKey(other.propertyKey));
@@ -244,7 +244,7 @@ public class PropertyScanner {
                         lineNumber,
                         propertyKey,
                         trimmed,
-                        "Property file entry"
+                        PatternType.PROPERTY_FILE_ENTRY
                     );
 
                     matches.add(match);
@@ -286,9 +286,9 @@ public class PropertyScanner {
         public final int lineNumber;
         public final String propertyKey;
         public final String context;
-        public final String patternType;
+        public final PatternType patternType;
 
-        public PropertyMatch(String filePath, int lineNumber, String propertyKey, String context, String patternType) {
+        public PropertyMatch(String filePath, int lineNumber, String propertyKey, String context, PatternType patternType) {
             this.filePath = filePath;
             this.lineNumber = lineNumber;
             this.propertyKey = propertyKey;
@@ -296,5 +296,37 @@ public class PropertyScanner {
             this.patternType = patternType;
         }
     }
-}
 
+    public enum PatternType {
+        VALUE_ANNOTATION("@Value annotation"),
+        CONFIGURATION_PROPERTY_ANNOTATION("@ConfigurationProperty annotation"),
+        CONFIGURATION_PROPERTIES_PREFIX("@ConfigurationProperties annotation (prefix)"),
+        ENVIRONMENT_GET_PROPERTY("Environment.getProperty()"),
+        SYSTEM_GET_PROPERTY("System.getProperty()"),
+        PROPERTY_SOURCE_ANNOTATION("@PropertySource annotation"),
+        PROPERTY_PLACEHOLDER("Property placeholder ${...}"),
+        PROPERTY_FILE_ENTRY("Property file entry"),
+        YAML_PROPERTY("YAML property"),
+        NESTED_CONFIGURATION_FIELD("Nested configuration field (used in indexed property)"),
+        CONFIGURATION_PROPERTIES_FIELD("ConfigurationProperties field"),
+        ACCESSOR_CALLS("Accessor calls updated (getter/setter)"),
+        UNKNOWN("Unknown pattern");
+
+        private final String displayName;
+
+        PatternType(String displayName) {
+            this.displayName = displayName;
+        }
+
+        public String getDisplayName() {
+            return displayName;
+        }
+
+        public String getDisplayName(String fieldName) {
+            if (this == CONFIGURATION_PROPERTIES_FIELD) {
+                return displayName + " (" + fieldName + ")";
+            }
+            return displayName;
+        }
+    }
+}

@@ -56,7 +56,7 @@ public class YamlPropertyHandler {
                             -1, // Line number not easily available with SnakeYAML
                             arrayPath,
                             arrayPath + ": " + (arrayElement != null ? arrayElement.toString() : "null"),
-                            "YAML property"
+                            PropertyScanner.PatternType.YAML_PROPERTY
                         ));
                     }
                 }
@@ -67,7 +67,7 @@ public class YamlPropertyHandler {
                     -1, // Line number not easily available with SnakeYAML
                     fullPath,
                     fullPath + ": " + (value != null ? value.toString() : "null"),
-                    "YAML property"
+                    PropertyScanner.PatternType.YAML_PROPERTY
                 ));
             }
         }
@@ -268,7 +268,7 @@ public class YamlPropertyHandler {
                             arrayLineNumber,
                             arrayPath,
                             arrayPath + ": " + (arrayElement != null ? arrayElement.toString() : "null"),
-                            "YAML property"
+                            PropertyScanner.PatternType.YAML_PROPERTY
                         ));
                     }
                 }
@@ -279,7 +279,7 @@ public class YamlPropertyHandler {
                     lineNumber,
                     fullPath,
                     fullPath + ": " + (value != null ? value.toString() : "null"),
-                    "YAML property"
+                    PropertyScanner.PatternType.YAML_PROPERTY
                 ));
             }
         }
@@ -483,7 +483,7 @@ public class YamlPropertyHandler {
                         if (!newSegment.equals(currentKey)) {
                             return newSegment;
                         }
-                    }
+                      }
                 } else if (posInNonMatching == 0 && nonMatchingNewCount > 0) {
                     // Only expand to multiple segments if counts differ and this is the first segment
                     StringBuilder newKeyPath = new StringBuilder();

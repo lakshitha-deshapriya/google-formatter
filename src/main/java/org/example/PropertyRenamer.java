@@ -8,7 +8,7 @@ import java.util.regex.Pattern;
 
 public class PropertyRenamer {
 
-    private ConfigurationPropertiesAnalyzer configPropertiesAnalyzer;
+    private final ConfigurationPropertiesAnalyzer configPropertiesAnalyzer;
 
     public PropertyRenamer() {
         this.configPropertiesAnalyzer = new ConfigurationPropertiesAnalyzer();
@@ -30,7 +30,7 @@ public class PropertyRenamer {
 
         // Check if this file has @ConfigurationProperties annotation
         boolean hasConfigurationProperties = propertyMatches.stream()
-            .anyMatch(m -> m.patternType.equals("@ConfigurationProperties annotation (prefix)"));
+            .anyMatch(m -> m.patternType == PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_PREFIX);
 
         // If it has @ConfigurationProperties, use the specialized analyzer
         if (hasConfigurationProperties) {
@@ -71,7 +71,7 @@ public class PropertyRenamer {
                     field.fieldName,
                     field.newFieldName,
                     RenameStatus.RENAMED,
-                    "Nested configuration field (used in indexed property)"
+                    PropertyScanner.PatternType.NESTED_CONFIGURATION_FIELD
                 ));
             }
         }
@@ -104,7 +104,7 @@ public class PropertyRenamer {
                 analysis.prefix,
                 analysis.newPrefix,
                 RenameStatus.RENAMED,
-                "@ConfigurationProperties annotation (prefix)"
+                PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_PREFIX
             ));
         } else if (mappings.containsKey(analysis.prefix)) {
             results.add(new RenameResult(
@@ -113,7 +113,7 @@ public class PropertyRenamer {
                 analysis.prefix,
                 analysis.prefix,
                 RenameStatus.UNCHANGED,
-                "@ConfigurationProperties annotation (prefix)"
+                PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_PREFIX
             ));
         } else {
             results.add(new RenameResult(
@@ -122,7 +122,7 @@ public class PropertyRenamer {
                 analysis.prefix,
                 null,
                 RenameStatus.NO_MAPPING,
-                "@ConfigurationProperties annotation (prefix)"
+                PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_PREFIX
             ));
         }
 
@@ -143,7 +143,8 @@ public class PropertyRenamer {
                     field.fullPropertyPath,
                     newPropertyPath,
                     RenameStatus.RENAMED,
-                    "ConfigurationProperties field (" + field.fieldName + ")"
+                    PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_FIELD,
+                    field.fieldName
                 ));
             } else if (mappings.containsKey(field.fullPropertyPath)) {
                 results.add(new RenameResult(
@@ -152,7 +153,8 @@ public class PropertyRenamer {
                     field.fullPropertyPath,
                     field.fullPropertyPath,
                     RenameStatus.UNCHANGED,
-                    "ConfigurationProperties field (" + field.fieldName + ")"
+                    PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_FIELD,
+                    field.fieldName
                 ));
             }
         }
@@ -163,7 +165,7 @@ public class PropertyRenamer {
         // Handle any other @Value or getProperty patterns in the same file
         List<PropertyScanner.PropertyMatch> nonPrefixMatches = new ArrayList<>();
         for (PropertyScanner.PropertyMatch match : propertyMatches) {
-            if (!match.patternType.equals("@ConfigurationProperties annotation (prefix)")) {
+            if (match.patternType != PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_PREFIX) {
                 nonPrefixMatches.add(match);
             }
         }
@@ -449,27 +451,27 @@ public class PropertyRenamer {
     }
 
     private String replaceBasedOnPatternType(String content, String originalKey, String extractedKey,
-                                            String newKey, String patternType) {
+                                            String newKey, PropertyScanner.PatternType patternType) {
         switch (patternType) {
-            case "@Value annotation":
+            case VALUE_ANNOTATION:
                 return replaceInValueAnnotation(content, originalKey, extractedKey, newKey);
 
-            case "@ConfigurationProperty annotation":
+            case CONFIGURATION_PROPERTY_ANNOTATION:
                 return replaceInConfigurationProperty(content, extractedKey, newKey);
 
-            case "@ConfigurationProperties annotation (prefix)":
+            case CONFIGURATION_PROPERTIES_PREFIX:
                 return replaceInConfigurationProperties(content, extractedKey, newKey);
 
-            case "Environment.getProperty()":
+            case ENVIRONMENT_GET_PROPERTY:
                 return replaceInEnvironmentGetProperty(content, extractedKey, newKey);
 
-            case "System.getProperty()":
+            case SYSTEM_GET_PROPERTY:
                 return replaceInSystemGetProperty(content, extractedKey, newKey);
 
-            case "@PropertySource annotation":
+            case PROPERTY_SOURCE_ANNOTATION:
                 return replaceInPropertySource(content, extractedKey, newKey);
 
-            case "Property placeholder ${...}":
+            case PROPERTY_PLACEHOLDER:
                 return replaceInPropertyPlaceholder(content, originalKey, extractedKey, newKey);
 
             default:
@@ -626,7 +628,7 @@ public class PropertyRenamer {
                         className + "." + oldFieldName,
                         className + "." + newFieldName,
                         RenameStatus.RENAMED,
-                        "Accessor calls updated (getter/setter)"
+                        PropertyScanner.PatternType.ACCESSOR_CALLS
                     ));
                 }
             }
@@ -656,16 +658,27 @@ public class PropertyRenamer {
         public final String oldKey;
         public final String newKey;
         public final RenameStatus status;
-        public final String patternType;
+        public final PropertyScanner.PatternType patternType;
+        public final String extraInfo;
 
         public RenameResult(String filePath, int lineNumber, String oldKey, String newKey,
-                           RenameStatus status, String patternType) {
+                           RenameStatus status, PropertyScanner.PatternType patternType) {
+            this(filePath, lineNumber, oldKey, newKey, status, patternType, null);
+        }
+
+        public RenameResult(String filePath, int lineNumber, String oldKey, String newKey,
+                           RenameStatus status, PropertyScanner.PatternType patternType, String extraInfo) {
             this.filePath = filePath;
             this.lineNumber = lineNumber;
             this.oldKey = oldKey;
             this.newKey = newKey;
             this.status = status;
             this.patternType = patternType;
+            this.extraInfo = extraInfo;
+        }
+
+        public String getPatternDescription() {
+            return extraInfo != null ? patternType.getDisplayName(extraInfo) : patternType.getDisplayName();
         }
     }
 }
