@@ -1,9 +1,20 @@
 package org.example;
 
-import java.io.File;
+import java.io.*;
 import java.util.*;
 
 public class PropertyRenameRunner {
+
+    // Helper class to store class information
+    public static class ClassInfo {
+        public final String packageName;
+        public final String filePath;
+
+        public ClassInfo(String packageName, String filePath) {
+            this.packageName = packageName;
+            this.filePath = filePath;
+        }
+    }
 
     public void runPropertyRename(String[] args, boolean renameGetSet) {
         String baseProjFolder;
@@ -83,12 +94,9 @@ public class PropertyRenameRunner {
                 propertyRenamer.renamePropertiesInFile(filePath, matches, mappings);
             allResults.addAll(results);
 
-            // Track field renames from @ConfigurationProperties classes for later getter/setter updates
             trackFieldRenames(results, filePath, fieldRenames);
         }
 
-        // Also process files that might be nested configuration classes
-        // (files that don't have property matches but might contain fields used in indexed properties)
         System.out.println("Checking for nested configuration classes...\n");
         for (String javaFile : allJavaFiles) {
             if (!fileMatches.containsKey(javaFile)) {
@@ -102,17 +110,27 @@ public class PropertyRenameRunner {
             }
         }
 
-        // Update getter/setter calls in all files based on field renames
         if (!fieldRenames.isEmpty() && renameGetSet) {
             System.out.println("Updating getter/setter calls for renamed fields...\n");
+
+            // Build a map of className -> (package, file path) from ALL Java files
+            // This ensures we have package information for all classes that may have been renamed
+            Map<String, ClassInfo> classInfoMap = new HashMap<>();
+            for (String javaFile : allJavaFiles) {
+                String className = extractClassName(javaFile);
+                if (className != null) {
+                    String packageName = extractPackageName(javaFile);
+                    classInfoMap.put(className, new ClassInfo(packageName, javaFile));
+                }
+            }
+
             for (String javaFile : allJavaFiles) {
                 List<PropertyRenamer.RenameResult> results =
-                    propertyRenamer.updateGetterSetterCalls(javaFile, fieldRenames);
+                    propertyRenamer.updateGetterSetterCalls(javaFile, fieldRenames, classInfoMap);
                 allResults.addAll(results);
             }
         }
 
-        // Generate summary report
         generateSummaryReport(allResults, separator);
     }
 
@@ -123,6 +141,30 @@ public class PropertyRenameRunner {
             return fileName.substring(0, fileName.length() - 5);
         }
         return null;
+    }
+
+    private String extractPackageName(String filePath) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (line.startsWith("package ")) {
+                    // Extract package name: "package com.example;" -> "com.example"
+                    String packageDecl = line.substring(8).trim();
+                    if (packageDecl.endsWith(";")) {
+                        packageDecl = packageDecl.substring(0, packageDecl.length() - 1);
+                    }
+                    return packageDecl.trim();
+                }
+                // Stop if we reach imports or class declaration
+                if (line.startsWith("import ") || line.contains("class ") || line.contains("interface ")) {
+                    break;
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Error reading package from file: " + filePath + " - " + e.getMessage());
+        }
+        return "";
     }
 
     private void trackFieldRenames(List<PropertyRenamer.RenameResult> results, String filePath,
@@ -425,11 +467,7 @@ public class PropertyRenameRunner {
     }
 
     private static String repeatString(String str, int count) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < count; i++) {
-            sb.append(str);
-        }
-        return sb.toString();
+        return String.valueOf(str).repeat(Math.max(0, count));
     }
 }
 

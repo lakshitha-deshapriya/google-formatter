@@ -597,7 +597,8 @@ public class PropertyRenamer {
         }
     }
 
-    public List<RenameResult> updateGetterSetterCalls(String filePath, Map<String, String> fieldRenames) {
+    public List<RenameResult> updateGetterSetterCalls(String filePath, Map<String, String> fieldRenames,
+                                                       Map<String, PropertyRenameRunner.ClassInfo> classInfoMap) {
         List<RenameResult> results = new ArrayList<>();
 
         if (fieldRenames.isEmpty()) {
@@ -606,7 +607,7 @@ public class PropertyRenamer {
 
         try {
             // Use JavaParser-based implementation from ConfigurationPropertiesAnalyzer
-            boolean wasModified = configPropertiesAnalyzer.updateAccessorCallsInFile(filePath, fieldRenames);
+            boolean wasModified = configPropertiesAnalyzer.updateAccessorCallsInFile(filePath, fieldRenames, classInfoMap);
 
             if (wasModified) {
                 for (Map.Entry<String, String> entry : fieldRenames.entrySet()) {

@@ -709,7 +709,7 @@ public class ConfigurationPropertiesAnalyzer {
                 .filter(path -> !path.toString().contains("/target/") &&
                               !path.toString().contains("/build/"))
                 .forEach(path -> {
-                    if (updateAccessorCallsInFile(path.toString(), fieldRenames)) {
+                    if (updateAccessorCallsInFile(path.toString(), fieldRenames, new HashMap<>())) {
                         modifiedFiles.add(path.toString());
                     }
                 });
@@ -723,7 +723,8 @@ public class ConfigurationPropertiesAnalyzer {
     /**
      * Updates getter/setter calls in a single file
      */
-    public boolean updateAccessorCallsInFile(String filePath, Map<String, String> fieldRenames) {
+    public boolean updateAccessorCallsInFile(String filePath, Map<String, String> fieldRenames,
+                                            Map<String, PropertyRenameRunner.ClassInfo> classInfoMap) {
         try {
             ParseResult<CompilationUnit> parseResult = javaParser.parse(Paths.get(filePath));
 
@@ -735,19 +736,46 @@ public class ConfigurationPropertiesAnalyzer {
             LexicalPreservingPrinter.setup(cu);
             boolean modified = false;
 
+            // Extract the package of the current file
+            String currentPackage = cu.getPackageDeclaration()
+                .map(pd -> pd.getNameAsString())
+                .orElse("");
+
+            // Extract all imports in the current file
+            Set<String> imports = new HashSet<>();
+            cu.getImports().forEach(importDecl -> {
+                String importPath = importDecl.getNameAsString();
+                imports.add(importPath);
+                // Also add just the class name for easier lookup
+                String className = importPath.substring(importPath.lastIndexOf('.') + 1);
+                imports.add(className);
+            });
+
             // Find all method call expressions
             List<MethodCallExpr> methodCalls = cu.findAll(MethodCallExpr.class);
 
             for (MethodCallExpr methodCall : methodCalls) {
                 String methodName = methodCall.getNameAsString();
 
+                // Skip static method calls (e.g., MembershipUtils.getAppId())
+                // Static methods are not generated from instance fields
+                if (isStaticMethodCall(methodCall)) {
+                    continue;
+                }
+
                 // Check if this is a getter or setter call for a renamed field
                 for (Map.Entry<String, String> rename : fieldRenames.entrySet()) {
                     String[] parts = rename.getKey().split("\\.");
                     if (parts.length != 2) continue;
 
+                    String className = parts[0];
                     String oldFieldName = parts[1];
                     String newFieldName = rename.getValue();
+
+                    // Check if we should update this accessor call
+                    if (!shouldUpdateAccessor(className, classInfoMap, currentPackage, imports)) {
+                        continue;
+                    }
 
                     String capitalizedOld = capitalize(oldFieldName);
                     String capitalizedNew = capitalize(newFieldName);
@@ -773,6 +801,97 @@ public class ConfigurationPropertiesAnalyzer {
 
         } catch (IOException e) {
             System.err.println("Error updating accessor calls in file: " + filePath + " - " + e.getMessage());
+        }
+
+        return false;
+    }
+
+    /**
+     * Checks if a method call is a static method call.
+     * Static method calls are invoked on class names (e.g., MembershipUtils.getAppId())
+     * rather than on instance variables (e.g., config.getAppId())
+     */
+    private boolean isStaticMethodCall(MethodCallExpr methodCall) {
+        // Check if the method has a scope (the part before the dot)
+        if (!methodCall.getScope().isPresent()) {
+            return false; // No scope means it's a local method call
+        }
+
+        com.github.javaparser.ast.expr.Expression scope = methodCall.getScope().get();
+
+        // If the scope is a NameExpr, check if it starts with uppercase (likely a class name)
+        if (scope instanceof com.github.javaparser.ast.expr.NameExpr) {
+            String scopeName = ((com.github.javaparser.ast.expr.NameExpr) scope).getNameAsString();
+            // If the name starts with an uppercase letter, it's likely a class name (static call)
+            if (!scopeName.isEmpty() && Character.isUpperCase(scopeName.charAt(0))) {
+                return true;
+            }
+        }
+
+        // If the scope is a FieldAccessExpr ending with 'class', it's a static call
+        // e.g., SomeClass.class.getMethod()
+        if (scope instanceof com.github.javaparser.ast.expr.FieldAccessExpr) {
+            com.github.javaparser.ast.expr.FieldAccessExpr fieldAccess =
+                (com.github.javaparser.ast.expr.FieldAccessExpr) scope;
+            if (fieldAccess.getNameAsString().equals("class")) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Determines if we should update accessor calls for the given class.
+     * Returns true if:
+     * 1. The classInfoMap is empty (backward compatibility - update all)
+     * 2. The class is in the same package as the current file, OR
+     * 3. The class is explicitly imported in the current file, OR
+     * 4. A wildcard import covers the class's package
+     */
+    private boolean shouldUpdateAccessor(String className, Map<String, PropertyRenameRunner.ClassInfo> classInfoMap,
+                                        String currentPackage, Set<String> imports) {
+        // If classInfoMap is empty, use old behavior (update all) for backward compatibility
+        if (classInfoMap == null || classInfoMap.isEmpty()) {
+            return true;
+        }
+
+        // Get the class info for the renamed class
+        PropertyRenameRunner.ClassInfo classInfo = classInfoMap.get(className);
+        if (classInfo == null) {
+            // If we don't have class info for this specific class, check if any import suggests it could be this class
+            // This handles cases where the class name might not match exactly or is from an external library
+            for (String importStr : imports) {
+                if (importStr.endsWith("." + className) || importStr.equals(className)) {
+                    return true;
+                }
+            }
+            // If still not found, be conservative and don't update
+            return false;
+        }
+
+        // Check if the class is in the same package
+        if (currentPackage.equals(classInfo.packageName)) {
+            return true;
+        }
+
+        // Check if the class is explicitly imported
+        String fullClassName = classInfo.packageName.isEmpty()
+            ? className
+            : classInfo.packageName + "." + className;
+
+        if (imports.contains(fullClassName) || imports.contains(className)) {
+            return true;
+        }
+
+        // Check for wildcard imports
+        if (!classInfo.packageName.isEmpty()) {
+            String wildcardImport = classInfo.packageName + ".*";
+            for (String importStr : imports) {
+                if (importStr.endsWith(".*") && wildcardImport.equals(importStr)) {
+                    return true;
+                }
+            }
         }
 
         return false;
