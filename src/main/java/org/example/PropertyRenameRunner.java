@@ -82,6 +82,9 @@ public class PropertyRenameRunner {
             List<PropertyRenamer.RenameResult> results =
                 propertyRenamer.renamePropertiesInFile(filePath, matches, mappings);
             allResults.addAll(results);
+
+            // Track field renames from @ConfigurationProperties classes for later getter/setter updates
+            trackFieldRenames(results, filePath, fieldRenames);
         }
 
         // Also process files that might be nested configuration classes
@@ -95,17 +98,7 @@ public class PropertyRenameRunner {
                 allResults.addAll(results);
 
                 // Track field renames from nested classes for later getter/setter updates
-                for (PropertyRenamer.RenameResult result : results) {
-                    if (result.status == PropertyRenamer.RenameStatus.RENAMED &&
-                        result.patternType.contains("Nested configuration field")) {
-                        // Extract class name from file path
-                        String className = extractClassName(javaFile);
-                        if (className != null) {
-                            String key = className + "." + result.oldKey;
-                            fieldRenames.put(key, result.newKey);
-                        }
-                    }
-                }
+                trackFieldRenames(results, javaFile, fieldRenames);
             }
         }
 
@@ -130,6 +123,93 @@ public class PropertyRenameRunner {
             return fileName.substring(0, fileName.length() - 5);
         }
         return null;
+    }
+
+    private void trackFieldRenames(List<PropertyRenamer.RenameResult> results, String filePath,
+                                   Map<String, String> fieldRenames) {
+        String className = extractClassName(filePath);
+        if (className == null) {
+            return;
+        }
+
+        for (PropertyRenamer.RenameResult result : results) {
+            if (result.status == PropertyRenamer.RenameStatus.RENAMED) {
+                // Track renames from ConfigurationProperties fields
+                if (result.patternType != null && result.patternType.startsWith("ConfigurationProperties field")) {
+                    // Extract old field name from pattern type - format: "ConfigurationProperties field (oldFieldName)"
+                    int startIdx = result.patternType.indexOf('(');
+                    int endIdx = result.patternType.indexOf(')');
+                    if (startIdx != -1 && endIdx != -1) {
+                        String oldFieldName = result.patternType.substring(startIdx + 1, endIdx);
+                        String key = className + "." + oldFieldName;
+
+                        // Extract the new field name from the property paths
+                        // For both simple and collection fields
+                        String newFieldName = extractNewFieldName(result.oldKey, result.newKey);
+                        if (newFieldName != null && !newFieldName.equals(oldFieldName)) {
+                            fieldRenames.put(key, newFieldName);
+                        }
+                    }
+                }
+                // Track renames from nested configuration fields
+                else if (result.patternType != null && result.patternType.contains("Nested configuration field")) {
+                    String key = className + "." + result.oldKey;
+                    fieldRenames.put(key, result.newKey);
+                }
+            }
+        }
+    }
+
+    private String extractNewFieldName(String oldPropertyPath, String newPropertyPath) {
+        // Extract field names from property paths by comparing old and new
+        // Examples:
+        //   "prefix.field" -> "prefix.newField" => "newField"
+        //   "prefix.collection[0].field" -> "prefix.newCollection[0].field" => "newCollection"
+
+        if (oldPropertyPath == null || newPropertyPath == null) {
+            return null;
+        }
+
+        // Remove array indices to get clean paths
+        String oldClean = oldPropertyPath.replaceAll("\\[\\d+\\]", "");
+        String newClean = newPropertyPath.replaceAll("\\[\\d+\\]", "");
+
+        // Split by dots and compare segments
+        String[] oldParts = oldClean.split("\\.");
+        String[] newParts = newClean.split("\\.");
+
+        // The field name is typically after the prefix (first segment)
+        // For indexed properties like "prefix.collection[0].field", the field name is at index 1
+        if (oldParts.length >= 2 && newParts.length >= 2) {
+            // Find the first segment that differs
+            for (int i = 1; i < Math.min(oldParts.length, newParts.length); i++) {
+                if (!oldParts[i].equals(newParts[i])) {
+                    // Convert from property name (kebab-case) to field name (camelCase)
+                    return toFieldName(newParts[i]);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private String toFieldName(String propertyName) {
+        // Convert property name (kebab-case) to field name (camelCase)
+        StringBuilder result = new StringBuilder();
+        boolean capitalizeNext = false;
+
+        for (char c : propertyName.toCharArray()) {
+            if (c == '-' || c == '_' || c == '.') {
+                capitalizeNext = true;
+            } else if (capitalizeNext) {
+                result.append(Character.toUpperCase(c));
+                capitalizeNext = false;
+            } else {
+                result.append(c);
+            }
+        }
+
+        return result.toString();
     }
 
     private void collectPropertyMatches(File directory, PropertyScanner scanner,
