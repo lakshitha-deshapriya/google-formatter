@@ -16,20 +16,30 @@ public class PropertyScanner {
 
     static {
         // @Value annotation patterns - supports multi-line with flexible whitespace
-        PROPERTY_PATTERNS.add(Pattern.compile("@Value\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\[\\s\\S])*)\"\\s*\\)"));
+        PROPERTY_PATTERNS.add(
+                Pattern.compile("@Value\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\[\\s\\S])*)\"\\s*\\)"));
 
         // @ConfigurationProperty annotation patterns
-        PROPERTY_PATTERNS.add(Pattern.compile("@ConfigurationProperty\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\[\\s\\S])*)\"\\s*\\)"));
-        PROPERTY_PATTERNS.add(Pattern.compile("@ConfigurationProperties\\s*\\(\\s*prefix\\s*=\\s*\"((?:[^\"\\\\]|\\\\[\\s\\S])*)\"\\s*\\)"));
+        PROPERTY_PATTERNS.add(
+                Pattern.compile(
+                        "@ConfigurationProperty\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\[\\s\\S])*)\"\\s*\\)"));
+        PROPERTY_PATTERNS.add(
+                Pattern.compile(
+                        "@ConfigurationProperties\\s*\\(\\s*prefix\\s*=\\s*\"((?:[^\"\\\\]|\\\\[\\s\\S])*)\"\\s*\\)"));
 
         // Environment.getProperty() patterns
-        PROPERTY_PATTERNS.add(Pattern.compile("getProperty\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\[\\s\\S])*)\""));
+        PROPERTY_PATTERNS.add(
+                Pattern.compile("getProperty\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\[\\s\\S])*)\""));
 
         // System.getProperty() patterns
-        PROPERTY_PATTERNS.add(Pattern.compile("System\\.getProperty\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\[\\s\\S])*)\""));
+        PROPERTY_PATTERNS.add(
+                Pattern.compile(
+                        "System\\.getProperty\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\[\\s\\S])*)\""));
 
         // @PropertySource annotation
-        PROPERTY_PATTERNS.add(Pattern.compile("@PropertySource\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\[\\s\\S])*)\"\\s*\\)"));
+        PROPERTY_PATTERNS.add(
+                Pattern.compile(
+                        "@PropertySource\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\[\\s\\S])*)\"\\s*\\)"));
 
         // application.properties/yml references in strings (common pattern)
         PROPERTY_PATTERNS.add(Pattern.compile("\\$\\{([^}]+)}"));
@@ -52,12 +62,11 @@ public class PropertyScanner {
 
             // Print results for this file (only if not in silent mode)
             if (!silentMode && !matches.isEmpty()) {
-                System.out.println(filePath);
+                Util.log(filePath);
                 for (PropertyMatch match : matches) {
-                    System.out.println("Line: " + match.lineNumber +
-                                     ", Property: " + match.propertyKey);
+                    Util.log("Line: " + match.lineNumber + ", Property: " + match.propertyKey);
                 }
-                System.out.println();
+                Util.log("");
             }
 
             return matches;
@@ -92,7 +101,7 @@ public class PropertyScanner {
                 Matcher matcher = multiLinePattern.matcher(fileContent);
 
                 while (matcher.find()) {
-                    String propertyKey = matcher.group(1).trim();  // Trim whitespace
+                    String propertyKey = matcher.group(1).trim(); // Trim whitespace
                     int matchStart = matcher.start();
 
                     // Calculate line number by counting newlines before the match
@@ -101,13 +110,9 @@ public class PropertyScanner {
                     // Get the context (the actual line where match starts, trimmed)
                     String context = lines.get(lineNumber - 1).trim();
 
-                    PropertyMatch newMatch = new PropertyMatch(
-                            filePath,
-                            lineNumber,
-                            propertyKey,
-                            context,
-                            patternType
-                    );
+                    PropertyMatch newMatch =
+                            new PropertyMatch(
+                                    filePath, lineNumber, propertyKey, context, patternType);
 
                     // Check for duplicates before adding
                     if (!isDuplicate(matches, newMatch)) {
@@ -120,19 +125,23 @@ public class PropertyScanner {
             matches = filterDuplicates(matches);
 
         } catch (IOException e) {
-            System.err.println("Error reading file: " + filePath + " - " + e.getMessage());
+            Util.logError("Error reading file: " + filePath + " - " + e.getMessage());
         }
 
         // Print results for this file (only if not in silent mode)
         if (!silentMode && !matches.isEmpty()) {
-            System.out.println(filePath);
+            Util.log(filePath);
 
             for (PropertyMatch match : matches) {
-                System.out.println("Line: " + match.lineNumber +
-                                 ", Usage: " + match.patternType.getDisplayName() +
-                                 ", Property: " + match.propertyKey);
+                Util.log(
+                        "Line: "
+                                + match.lineNumber
+                                + ", Usage: "
+                                + match.patternType.getDisplayName()
+                                + ", Property: "
+                                + match.propertyKey);
             }
-            System.out.println();
+            Util.log("");
         }
 
         return matches;
@@ -173,9 +182,9 @@ public class PropertyScanner {
 
     private boolean isDuplicate(List<PropertyMatch> matches, PropertyMatch newMatch) {
         for (PropertyMatch existing : matches) {
-            if (existing.lineNumber == newMatch.lineNumber &&
-                existing.propertyKey.equals(newMatch.propertyKey) &&
-                existing.patternType == newMatch.patternType) {
+            if (existing.lineNumber == newMatch.lineNumber
+                    && existing.propertyKey.equals(newMatch.propertyKey)
+                    && existing.patternType == newMatch.patternType) {
                 return true;
             }
         }
@@ -192,8 +201,10 @@ public class PropertyScanner {
                 for (PropertyMatch other : matches) {
                     if (other.patternType != PatternType.PROPERTY_PLACEHOLDER) {
                         boolean sameArea = Math.abs(other.lineNumber - match.lineNumber) <= 5;
-                        boolean propertyContained = other.propertyKey.contains(match.propertyKey) ||
-                                                   match.propertyKey.equals(extractPropertyKey(other.propertyKey));
+                        boolean propertyContained =
+                                other.propertyKey.contains(match.propertyKey)
+                                        || match.propertyKey.equals(
+                                                extractPropertyKey(other.propertyKey));
 
                         if (sameArea && propertyContained) {
                             shouldAdd = false;
@@ -223,12 +234,10 @@ public class PropertyScanner {
                 lineNumber++;
                 String trimmed = line.trim();
 
-                // Skip comments and empty lines
                 if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!")) {
                     continue;
                 }
 
-                // Extract property key (before = or :)
                 int separatorIndex = -1;
                 if (trimmed.contains("=")) {
                     separatorIndex = trimmed.indexOf("=");
@@ -239,30 +248,29 @@ public class PropertyScanner {
                 if (separatorIndex > 0) {
                     String propertyKey = trimmed.substring(0, separatorIndex).trim();
 
-                    PropertyMatch match = new PropertyMatch(
-                        filePath,
-                        lineNumber,
-                        propertyKey,
-                        trimmed,
-                        PatternType.PROPERTY_FILE_ENTRY
-                    );
+                    PropertyMatch match =
+                            new PropertyMatch(
+                                    filePath,
+                                    lineNumber,
+                                    propertyKey,
+                                    trimmed,
+                                    PatternType.PROPERTY_FILE_ENTRY);
 
                     matches.add(match);
                 }
             }
 
         } catch (IOException e) {
-            System.err.println("Error reading properties file: " + filePath + " - " + e.getMessage());
+            Util.logError("Error reading properties file: " + filePath + " - " + e.getMessage());
         }
 
         // Print results for this file (only if not in silent mode)
         if (!silentMode && !matches.isEmpty()) {
-            System.out.println(filePath);
+            Util.log(filePath);
             for (PropertyMatch match : matches) {
-                System.out.println("Line: " + match.lineNumber +
-                                 ", Property: " + match.propertyKey);
+                Util.log("Line: " + match.lineNumber + ", Property: " + match.propertyKey);
             }
-            System.out.println();
+            Util.log("");
         }
 
         return matches;
@@ -288,7 +296,12 @@ public class PropertyScanner {
         public final String context;
         public final PatternType patternType;
 
-        public PropertyMatch(String filePath, int lineNumber, String propertyKey, String context, PatternType patternType) {
+        public PropertyMatch(
+                String filePath,
+                int lineNumber,
+                String propertyKey,
+                String context,
+                PatternType patternType) {
             this.filePath = filePath;
             this.lineNumber = lineNumber;
             this.propertyKey = propertyKey;

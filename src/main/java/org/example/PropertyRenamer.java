@@ -14,12 +14,12 @@ public class PropertyRenamer {
         this.configPropertiesAnalyzer = new ConfigurationPropertiesAnalyzer();
     }
 
-    public List<RenameResult> renamePropertiesInFile(String filePath,
-                                                      List<PropertyScanner.PropertyMatch> propertyMatches,
-                                                      Map<String, String> mappings) {
+    public List<RenameResult> renamePropertiesInFile(
+            String filePath,
+            List<PropertyScanner.PropertyMatch> propertyMatches,
+            Map<String, String> mappings) {
         List<RenameResult> results = new ArrayList<>();
 
-        // Check if this file is a nested configuration class (no property matches but has indexed property mappings)
         if (propertyMatches.isEmpty() && isNestedConfigClass(mappings)) {
             return handleNestedConfigClass(filePath, mappings);
         }
@@ -28,21 +28,21 @@ public class PropertyRenamer {
             return results;
         }
 
-        // Check if this file has @ConfigurationProperties annotation
-        boolean hasConfigurationProperties = propertyMatches.stream()
-            .anyMatch(m -> m.patternType == PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_PREFIX);
+        boolean hasConfigurationProperties =
+                propertyMatches.stream()
+                        .anyMatch(
+                                m ->
+                                        m.patternType
+                                                == PropertyScanner.PatternType
+                                                        .CONFIGURATION_PROPERTIES_PREFIX);
 
-        // If it has @ConfigurationProperties, use the specialized analyzer
         if (hasConfigurationProperties) {
             return handleConfigurationPropertiesFile(filePath, propertyMatches, mappings);
         }
-
-        // Otherwise, handle as a regular file
         return handleRegularFile(filePath, propertyMatches, mappings);
     }
 
     private boolean isNestedConfigClass(Map<String, String> mappings) {
-        // Check if any mapping contains indexed property notation
         for (String key : mappings.keySet()) {
             if (key.matches(".*\\[\\d+\\]\\.\\w+.*")) {
                 return true;
@@ -51,28 +51,27 @@ public class PropertyRenamer {
         return false;
     }
 
-    private List<RenameResult> handleNestedConfigClass(String filePath, Map<String, String> mappings) {
+    private List<RenameResult> handleNestedConfigClass(
+            String filePath, Map<String, String> mappings) {
         List<RenameResult> results = new ArrayList<>();
 
-        // Use the analyzer to process nested config class
         ConfigurationPropertiesAnalyzer.AnalysisResult analysis =
-            configPropertiesAnalyzer.analyzeNestedConfigClass(filePath, mappings);
+                configPropertiesAnalyzer.analyzeNestedConfigClass(filePath, mappings);
 
         if (analysis == null || analysis.fields.isEmpty()) {
             return results;
         }
 
-        // Process field renames
         for (ConfigurationPropertiesAnalyzer.FieldInfo field : analysis.fields) {
             if (field.needsRename) {
-                results.add(new RenameResult(
-                    filePath,
-                    field.lineNumber,
-                    field.fieldName,
-                    field.newFieldName,
-                    RenameStatus.RENAMED,
-                    PropertyScanner.PatternType.NESTED_CONFIGURATION_FIELD
-                ));
+                results.add(
+                        new RenameResult(
+                                filePath,
+                                field.lineNumber,
+                                field.fieldName,
+                                field.newFieldName,
+                                RenameStatus.RENAMED,
+                                PropertyScanner.PatternType.NESTED_CONFIGURATION_FIELD));
             }
         }
 
@@ -82,54 +81,52 @@ public class PropertyRenamer {
         return results;
     }
 
-    private List<RenameResult> handleConfigurationPropertiesFile(String filePath,
-                                                                  List<PropertyScanner.PropertyMatch> propertyMatches,
-                                                                  Map<String, String> mappings) {
+    private List<RenameResult> handleConfigurationPropertiesFile(
+            String filePath,
+            List<PropertyScanner.PropertyMatch> propertyMatches,
+            Map<String, String> mappings) {
         List<RenameResult> results = new ArrayList<>();
 
-        // Analyze the configuration properties class
         ConfigurationPropertiesAnalyzer.AnalysisResult analysis =
-            configPropertiesAnalyzer.analyzeFile(filePath, mappings);
+                configPropertiesAnalyzer.analyzeFile(filePath, mappings);
 
         if (analysis == null) {
-            // Fallback to regular processing if analysis fails
             return handleRegularFile(filePath, propertyMatches, mappings);
         }
 
-        // Handle prefix change
         if (analysis.prefixChanged) {
-            results.add(new RenameResult(
-                filePath,
-                analysis.prefixLineNumber,
-                analysis.prefix,
-                analysis.newPrefix,
-                RenameStatus.RENAMED,
-                PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_PREFIX
-            ));
+            results.add(
+                    new RenameResult(
+                            filePath,
+                            analysis.prefixLineNumber,
+                            analysis.prefix,
+                            analysis.newPrefix,
+                            RenameStatus.RENAMED,
+                            PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_PREFIX));
         } else if (mappings.containsKey(analysis.prefix)) {
-            results.add(new RenameResult(
-                filePath,
-                analysis.prefixLineNumber,
-                analysis.prefix,
-                analysis.prefix,
-                RenameStatus.UNCHANGED,
-                PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_PREFIX
-            ));
+            results.add(
+                    new RenameResult(
+                            filePath,
+                            analysis.prefixLineNumber,
+                            analysis.prefix,
+                            analysis.prefix,
+                            RenameStatus.UNCHANGED,
+                            PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_PREFIX));
         } else {
-            results.add(new RenameResult(
-                filePath,
-                analysis.prefixLineNumber,
-                analysis.prefix,
-                null,
-                RenameStatus.NO_MAPPING,
-                PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_PREFIX
-            ));
+            results.add(
+                    new RenameResult(
+                            filePath,
+                            analysis.prefixLineNumber,
+                            analysis.prefix,
+                            null,
+                            RenameStatus.NO_MAPPING,
+                            PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_PREFIX));
         }
 
-        // Handle field renames
         for (ConfigurationPropertiesAnalyzer.FieldInfo field : analysis.fields) {
             if (field.needsRename) {
-                String newPrefix = analysis.newPrefix != null ? analysis.newPrefix : analysis.prefix;
+                String newPrefix =
+                        analysis.newPrefix != null ? analysis.newPrefix : analysis.prefix;
                 String newPropertyPath = newPrefix + "." + field.toPropertyName();
 
                 // If there's a specific mapping for this field, use it
@@ -137,32 +134,30 @@ public class PropertyRenamer {
                     newPropertyPath = mappings.get(field.fullPropertyPath);
                 }
 
-                results.add(new RenameResult(
-                    filePath,
-                    field.lineNumber,
-                    field.fullPropertyPath,
-                    newPropertyPath,
-                    RenameStatus.RENAMED,
-                    PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_FIELD,
-                    field.fieldName
-                ));
+                results.add(
+                        new RenameResult(
+                                filePath,
+                                field.lineNumber,
+                                field.fullPropertyPath,
+                                newPropertyPath,
+                                RenameStatus.RENAMED,
+                                PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_FIELD,
+                                field.fieldName));
             } else if (mappings.containsKey(field.fullPropertyPath)) {
-                results.add(new RenameResult(
-                    filePath,
-                    field.lineNumber,
-                    field.fullPropertyPath,
-                    field.fullPropertyPath,
-                    RenameStatus.UNCHANGED,
-                    PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_FIELD,
-                    field.fieldName
-                ));
+                results.add(
+                        new RenameResult(
+                                filePath,
+                                field.lineNumber,
+                                field.fullPropertyPath,
+                                field.fullPropertyPath,
+                                RenameStatus.UNCHANGED,
+                                PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_FIELD,
+                                field.fieldName));
             }
         }
 
-        // Apply all changes to the file
         configPropertiesAnalyzer.applyChanges(analysis);
 
-        // Handle any other @Value or getProperty patterns in the same file
         List<PropertyScanner.PropertyMatch> nonPrefixMatches = new ArrayList<>();
         for (PropertyScanner.PropertyMatch match : propertyMatches) {
             if (match.patternType != PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_PREFIX) {
@@ -177,15 +172,15 @@ public class PropertyRenamer {
         return results;
     }
 
-    private List<RenameResult> handleYamlFile(String filePath,
-                                               List<PropertyScanner.PropertyMatch> propertyMatches,
-                                               Map<String, String> mappings) {
+    private List<RenameResult> handleYamlFile(
+            String filePath,
+            List<PropertyScanner.PropertyMatch> propertyMatches,
+            Map<String, String> mappings) {
         List<RenameResult> results = new ArrayList<>();
 
         try {
             YamlPropertyHandler yamlHandler = new YamlPropertyHandler();
 
-            // Track which properties will be renamed
             boolean hasChanges = false;
             for (PropertyScanner.PropertyMatch match : propertyMatches) {
                 String oldKey = match.propertyKey;
@@ -194,64 +189,64 @@ public class PropertyRenamer {
                     String newKey = mappings.get(oldKey);
 
                     if (oldKey.equals(newKey)) {
-                        results.add(new RenameResult(
-                            filePath,
-                            match.lineNumber,
-                            oldKey,
-                            newKey,
-                            RenameStatus.UNCHANGED,
-                            match.patternType
-                        ));
+                        results.add(
+                                new RenameResult(
+                                        filePath,
+                                        match.lineNumber,
+                                        oldKey,
+                                        newKey,
+                                        RenameStatus.UNCHANGED,
+                                        match.patternType));
                     } else {
                         hasChanges = true;
-                        results.add(new RenameResult(
-                            filePath,
-                            match.lineNumber,
-                            oldKey,
-                            newKey,
-                            RenameStatus.RENAMED,
-                            match.patternType
-                        ));
+                        results.add(
+                                new RenameResult(
+                                        filePath,
+                                        match.lineNumber,
+                                        oldKey,
+                                        newKey,
+                                        RenameStatus.RENAMED,
+                                        match.patternType));
                     }
                 } else {
-                    results.add(new RenameResult(
-                        filePath,
-                        match.lineNumber,
-                        oldKey,
-                        null,
-                        RenameStatus.NO_MAPPING,
-                        match.patternType
-                    ));
+                    results.add(
+                            new RenameResult(
+                                    filePath,
+                                    match.lineNumber,
+                                    oldKey,
+                                    null,
+                                    RenameStatus.NO_MAPPING,
+                                    match.patternType));
                 }
             }
 
-            // Apply changes if needed
             if (hasChanges) {
                 yamlHandler.renamePropertiesInYaml(filePath, mappings);
             }
 
         } catch (Exception e) {
-            System.err.println("Error processing YAML file: " + filePath + " - " + e.getMessage());
+            Util.logError("Error processing YAML file: " + filePath + " - " + e.getMessage());
         }
 
         return results;
     }
 
-    private List<RenameResult> handleRegularFile(String filePath,
-                                                  List<PropertyScanner.PropertyMatch> propertyMatches,
-                                                  Map<String, String> mappings) {
+    private List<RenameResult> handleRegularFile(
+            String filePath,
+            List<PropertyScanner.PropertyMatch> propertyMatches,
+            Map<String, String> mappings) {
         List<RenameResult> results = new ArrayList<>();
 
-        // Check if this is a .properties file
-        if (filePath.endsWith(".properties") || filePath.endsWith(".yml") || filePath.endsWith(".yaml")) {
+        if (filePath.endsWith(".properties")
+                || filePath.endsWith(".yml")
+                || filePath.endsWith(".yaml")) {
             return handlePropertiesFile(filePath, propertyMatches, mappings);
         }
 
         try {
             // Read the entire file
             File file = new File(filePath);
-            String content = readFileContent(file);
-            String modifiedContent = content;
+            String modifiedContent = readFileContent(file);
             boolean fileModified = false;
 
             // Process each property match
@@ -259,75 +254,70 @@ public class PropertyRenamer {
                 String oldKey = match.propertyKey;
                 String extractedKey = extractPropertyKey(oldKey);
 
-                // Check if mapping exists
                 if (mappings.containsKey(extractedKey)) {
                     String newKey = mappings.get(extractedKey);
 
                     if (extractedKey.equals(newKey)) {
-                        // Mapping exists but no change needed
-                        results.add(new RenameResult(
-                            filePath,
-                            match.lineNumber,
-                            extractedKey,
-                            newKey,
-                            RenameStatus.UNCHANGED,
-                            match.patternType
-                        ));
+                        results.add(
+                                new RenameResult(
+                                        filePath,
+                                        match.lineNumber,
+                                        extractedKey,
+                                        newKey,
+                                        RenameStatus.UNCHANGED,
+                                        match.patternType));
                     } else {
-                        // Perform the replacement based on pattern type
-                        String replacementResult = replaceBasedOnPatternType(
-                            modifiedContent,
-                            oldKey,
-                            extractedKey,
-                            newKey,
-                            match.patternType
-                        );
+                        String replacementResult =
+                                replaceBasedOnPatternType(
+                                        modifiedContent,
+                                        oldKey,
+                                        extractedKey,
+                                        newKey,
+                                        match.patternType);
 
                         if (!replacementResult.equals(modifiedContent)) {
                             modifiedContent = replacementResult;
                             fileModified = true;
                         }
 
-                        results.add(new RenameResult(
-                            filePath,
-                            match.lineNumber,
-                            extractedKey,
-                            newKey,
-                            RenameStatus.RENAMED,
-                            match.patternType
-                        ));
+                        results.add(
+                                new RenameResult(
+                                        filePath,
+                                        match.lineNumber,
+                                        extractedKey,
+                                        newKey,
+                                        RenameStatus.RENAMED,
+                                        match.patternType));
                     }
                 } else {
-                    // No mapping found
-                    results.add(new RenameResult(
-                        filePath,
-                        match.lineNumber,
-                        extractedKey,
-                        null,
-                        RenameStatus.NO_MAPPING,
-                        match.patternType
-                    ));
+                    results.add(
+                            new RenameResult(
+                                    filePath,
+                                    match.lineNumber,
+                                    extractedKey,
+                                    null,
+                                    RenameStatus.NO_MAPPING,
+                                    match.patternType));
                 }
             }
 
-            // Write the modified content back to the file if changes were made
             if (fileModified) {
                 writeFileContent(file, modifiedContent);
             }
 
         } catch (IOException e) {
-            System.err.println("Error processing file: " + filePath + " - " + e.getMessage());
+            Util.logError("Error processing file: " + filePath + " - " + e.getMessage());
         }
 
         return results;
     }
 
-    private List<RenameResult> handlePropertiesFile(String filePath,
-                                                     List<PropertyScanner.PropertyMatch> propertyMatches,
-                                                     Map<String, String> mappings) {
+    private List<RenameResult> handlePropertiesFile(
+            String filePath,
+            List<PropertyScanner.PropertyMatch> propertyMatches,
+            Map<String, String> mappings) {
         List<RenameResult> results = new ArrayList<>();
 
-        // Check if this is a YAML file
         if (filePath.endsWith(".yml") || filePath.endsWith(".yaml")) {
             return handleYamlFile(filePath, propertyMatches, mappings);
         }
@@ -336,7 +326,6 @@ public class PropertyRenamer {
             File file = new File(filePath);
             List<String> lines = new ArrayList<>();
 
-            // Read all lines
             try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
@@ -345,8 +334,6 @@ public class PropertyRenamer {
             }
 
             boolean fileModified = false;
-
-            // Process each property match
             for (PropertyScanner.PropertyMatch match : propertyMatches) {
                 String oldKey = match.propertyKey;
 
@@ -354,54 +341,50 @@ public class PropertyRenamer {
                     String newKey = mappings.get(oldKey);
 
                     if (oldKey.equals(newKey)) {
-                        results.add(new RenameResult(
-                            filePath,
-                            match.lineNumber,
-                            oldKey,
-                            newKey,
-                            RenameStatus.UNCHANGED,
-                            match.patternType
-                        ));
+                        results.add(
+                                new RenameResult(
+                                        filePath,
+                                        match.lineNumber,
+                                        oldKey,
+                                        newKey,
+                                        RenameStatus.UNCHANGED,
+                                        match.patternType));
                     } else {
-                        // Replace the property key in the line
                         int lineIndex = match.lineNumber - 1;
                         if (lineIndex >= 0 && lineIndex < lines.size()) {
                             String line = lines.get(lineIndex);
 
-                            // Replace the key (handle both = and : separators)
-                            String newLine = line.replaceFirst(
-                                "^(\\s*)" + Pattern.quote(oldKey) + "(\\s*[=:])",
-                                "$1" + newKey + "$2"
-                            );
+                            String newLine =
+                                    line.replaceFirst(
+                                            "^(\\s*)" + Pattern.quote(oldKey) + "(\\s*[=:])",
+                                            "$1" + newKey + "$2");
 
                             lines.set(lineIndex, newLine);
                             fileModified = true;
 
-                            results.add(new RenameResult(
-                                filePath,
-                                match.lineNumber,
-                                oldKey,
-                                newKey,
-                                RenameStatus.RENAMED,
-                                match.patternType
-                            ));
+                            results.add(
+                                    new RenameResult(
+                                            filePath,
+                                            match.lineNumber,
+                                            oldKey,
+                                            newKey,
+                                            RenameStatus.RENAMED,
+                                            match.patternType));
                         }
                     }
                 } else {
-                    results.add(new RenameResult(
-                        filePath,
-                        match.lineNumber,
-                        oldKey,
-                        null,
-                        RenameStatus.NO_MAPPING,
-                        match.patternType
-                    ));
+                    results.add(
+                            new RenameResult(
+                                    filePath,
+                                    match.lineNumber,
+                                    oldKey,
+                                    null,
+                                    RenameStatus.NO_MAPPING,
+                                    match.patternType));
                 }
             }
 
-            // Write back if modified
             if (fileModified) {
-                // Check if original file had trailing newline
                 boolean hadTrailingNewline = false;
                 try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
                     if (raf.length() > 0) {
@@ -418,7 +401,6 @@ public class PropertyRenamer {
                             writer.write("\n");
                         }
                     }
-                    // Preserve trailing newline if the original file had one
                     if (hadTrailingNewline) {
                         writer.write("\n");
                     }
@@ -426,7 +408,7 @@ public class PropertyRenamer {
             }
 
         } catch (IOException e) {
-            System.err.println("Error processing properties file: " + filePath + " - " + e.getMessage());
+            Util.logError("Error processing properties file: " + filePath + " - " + e.getMessage());
         }
 
         return results;
@@ -437,21 +419,24 @@ public class PropertyRenamer {
 
         if (trimmed.startsWith("${") && trimmed.endsWith("}")) {
             String inner = trimmed.substring(2, trimmed.length() - 1);
-            // Remove default value if present
             int colonIndex = inner.indexOf(':');
             if (colonIndex > 0) {
                 return inner.substring(0, colonIndex).trim();
             }
             return inner.trim();
         }
-        if (trimmed.contains(":") && trimmed.split(":").length == 2){
+        if (trimmed.contains(":") && trimmed.split(":").length == 2) {
             return trimmed.split(":")[0].trim();
         }
         return trimmed;
     }
 
-    private String replaceBasedOnPatternType(String content, String originalKey, String extractedKey,
-                                            String newKey, PropertyScanner.PatternType patternType) {
+    private String replaceBasedOnPatternType(
+            String content,
+            String originalKey,
+            String extractedKey,
+            String newKey,
+            PropertyScanner.PatternType patternType) {
         switch (patternType) {
             case VALUE_ANNOTATION:
                 return replaceInValueAnnotation(content, originalKey, extractedKey, newKey);
@@ -479,11 +464,10 @@ public class PropertyRenamer {
         }
     }
 
-    private String replaceInValueAnnotation(String content, String originalKey, String extractedKey, String newKey) {
-        // Handle ${property.key} format
+    private String replaceInValueAnnotation(
+            String content, String originalKey, String extractedKey, String newKey) {
         String trimmedKey = originalKey.trim();
         if (trimmedKey.startsWith("${") && trimmedKey.endsWith("}")) {
-            // Check if it has a default value
             if (trimmedKey.contains(":")) {
                 String regexPattern = "\\$\\{\\s*" + Pattern.quote(extractedKey) + "\\s*:";
                 String replacement = "\\${" + newKey + ":";
@@ -499,37 +483,49 @@ public class PropertyRenamer {
         return content;
     }
 
-    private String replaceInConfigurationProperty(String content, String extractedKey, String newKey) {
-        String pattern = "@ConfigurationProperty\\s*\\(\\s*[\"']" + Pattern.quote(extractedKey) + "[\"']\\s*\\)";
+    private String replaceInConfigurationProperty(
+            String content, String extractedKey, String newKey) {
+        String pattern =
+                "@ConfigurationProperty\\s*\\(\\s*[\"']"
+                        + Pattern.quote(extractedKey)
+                        + "[\"']\\s*\\)";
         String replacement = "@ConfigurationProperty(\"" + newKey + "\")";
         return content.replaceAll(pattern, replacement);
     }
 
-    private String replaceInConfigurationProperties(String content, String extractedKey, String newKey) {
-        String pattern = "@ConfigurationProperties\\s*\\(\\s*prefix\\s*=\\s*[\"']" + Pattern.quote(extractedKey) + "[\"']\\s*\\)";
+    private String replaceInConfigurationProperties(
+            String content, String extractedKey, String newKey) {
+        String pattern =
+                "@ConfigurationProperties\\s*\\(\\s*prefix\\s*=\\s*[\"']"
+                        + Pattern.quote(extractedKey)
+                        + "[\"']\\s*\\)";
         String replacement = "@ConfigurationProperties(prefix = \"" + newKey + "\")";
         return content.replaceAll(pattern, replacement);
     }
 
-    private String replaceInEnvironmentGetProperty(String content, String extractedKey, String newKey) {
+    private String replaceInEnvironmentGetProperty(
+            String content, String extractedKey, String newKey) {
         String pattern = "getProperty\\s*\\(\\s*[\"']" + Pattern.quote(extractedKey) + "[\"']";
         String replacement = "getProperty(\"" + newKey + "\"";
         return content.replaceAll(pattern, replacement);
     }
 
     private String replaceInSystemGetProperty(String content, String extractedKey, String newKey) {
-        String pattern = "System\\.getProperty\\s*\\(\\s*[\"']" + Pattern.quote(extractedKey) + "[\"']";
+        String pattern =
+                "System\\.getProperty\\s*\\(\\s*[\"']" + Pattern.quote(extractedKey) + "[\"']";
         String replacement = "System.getProperty(\"" + newKey + "\"";
         return content.replaceAll(pattern, replacement);
     }
 
     private String replaceInPropertySource(String content, String extractedKey, String newKey) {
-        String pattern = "@PropertySource\\s*\\(\\s*[\"']" + Pattern.quote(extractedKey) + "[\"']\\s*\\)";
+        String pattern =
+                "@PropertySource\\s*\\(\\s*[\"']" + Pattern.quote(extractedKey) + "[\"']\\s*\\)";
         String replacement = "@PropertySource(\"" + newKey + "\")";
         return content.replaceAll(pattern, replacement);
     }
 
-    private String replaceInPropertyPlaceholder(String content, String originalKey, String extractedKey, String newKey) {
+    private String replaceInPropertyPlaceholder(
+            String content, String originalKey, String extractedKey, String newKey) {
         String trimmedKey = originalKey.trim();
         if (trimmedKey.startsWith("${") && trimmedKey.endsWith("}")) {
             if (trimmedKey.contains(":")) {
@@ -556,7 +552,6 @@ public class PropertyRenamer {
     }
 
     private String readFileContent(File file) throws IOException {
-        // Read entire file preserving exact format including trailing newlines
         StringBuilder content = new StringBuilder();
         try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
             String line;
@@ -570,14 +565,12 @@ public class PropertyRenamer {
             }
         }
 
-        // Check if original file ended with newline(s) and preserve them
         try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
             if (raf.length() > 0) {
                 raf.seek(raf.length() - 1);
                 byte lastByte = raf.readByte();
                 if (lastByte == '\n') {
                     content.append("\n");
-                    // Check for multiple trailing newlines
                     if (raf.length() > 1) {
                         raf.seek(raf.length() - 2);
                         byte secondLastByte = raf.readByte();
@@ -599,8 +592,10 @@ public class PropertyRenamer {
         }
     }
 
-    public List<RenameResult> updateGetterSetterCalls(String filePath, Map<String, String> fieldRenames,
-                                                       Map<String, PropertyRenameRunner.ClassInfo> classInfoMap) {
+    public List<RenameResult> updateGetterSetterCalls(
+            String filePath,
+            Map<String, String> fieldRenames,
+            Map<String, PropertyRenameRunner.ClassInfo> classInfoMap) {
         List<RenameResult> results = new ArrayList<>();
 
         if (fieldRenames.isEmpty()) {
@@ -608,8 +603,9 @@ public class PropertyRenamer {
         }
 
         try {
-            // Use JavaParser-based implementation from ConfigurationPropertiesAnalyzer
-            boolean wasModified = configPropertiesAnalyzer.updateAccessorCallsInFile(filePath, fieldRenames, classInfoMap);
+            boolean wasModified =
+                    configPropertiesAnalyzer.updateAccessorCallsInFile(
+                            filePath, fieldRenames, classInfoMap);
 
             if (wasModified) {
                 for (Map.Entry<String, String> entry : fieldRenames.entrySet()) {
@@ -622,28 +618,25 @@ public class PropertyRenamer {
                     String className = parts[0];
                     String oldFieldName = parts[1];
 
-                    results.add(new RenameResult(
-                        filePath,
-                        -1,
-                        className + "." + oldFieldName,
-                        className + "." + newFieldName,
-                        RenameStatus.RENAMED,
-                        PropertyScanner.PatternType.ACCESSOR_CALLS
-                    ));
+                    results.add(
+                            new RenameResult(
+                                    filePath,
+                                    -1,
+                                    className + "." + oldFieldName,
+                                    className + "." + newFieldName,
+                                    RenameStatus.RENAMED,
+                                    PropertyScanner.PatternType.ACCESSOR_CALLS));
                 }
             }
         } catch (Exception e) {
-            System.err.println("Error updating getter/setter calls in file: " + filePath + " - " + e.getMessage());
+            Util.logError(
+                    "Error updating getter/setter calls in file: "
+                            + filePath
+                            + " - "
+                            + e.getMessage());
         }
 
         return results;
-    }
-
-    private String capitalize(String str) {
-        if (str == null || str.isEmpty()) {
-            return str;
-        }
-        return str.substring(0, 1).toUpperCase() + str.substring(1);
     }
 
     public enum RenameStatus {
@@ -661,13 +654,24 @@ public class PropertyRenamer {
         public final PropertyScanner.PatternType patternType;
         public final String extraInfo;
 
-        public RenameResult(String filePath, int lineNumber, String oldKey, String newKey,
-                           RenameStatus status, PropertyScanner.PatternType patternType) {
+        public RenameResult(
+                String filePath,
+                int lineNumber,
+                String oldKey,
+                String newKey,
+                RenameStatus status,
+                PropertyScanner.PatternType patternType) {
             this(filePath, lineNumber, oldKey, newKey, status, patternType, null);
         }
 
-        public RenameResult(String filePath, int lineNumber, String oldKey, String newKey,
-                           RenameStatus status, PropertyScanner.PatternType patternType, String extraInfo) {
+        public RenameResult(
+                String filePath,
+                int lineNumber,
+                String oldKey,
+                String newKey,
+                RenameStatus status,
+                PropertyScanner.PatternType patternType,
+                String extraInfo) {
             this.filePath = filePath;
             this.lineNumber = lineNumber;
             this.oldKey = oldKey;
@@ -678,8 +682,9 @@ public class PropertyRenamer {
         }
 
         public String getPatternDescription() {
-            return extraInfo != null ? patternType.getDisplayName(extraInfo) : patternType.getDisplayName();
+            return extraInfo != null
+                    ? patternType.getDisplayName(extraInfo)
+                    : patternType.getDisplayName();
         }
     }
 }
-

@@ -18,17 +18,14 @@ public class PropertyMappingReader {
             boolean firstLine = true;
 
             while ((line = reader.readLine()) != null) {
-                // Skip empty lines
                 if (line.trim().isEmpty()) {
                     continue;
                 }
 
-                // Parse header line to find column indices
                 if (firstLine) {
                     firstLine = false;
                     String[] headers = splitCSVLine(line);
 
-                    // Find the indices of "Old Property Key" and "New Property Key" columns
                     for (int i = 0; i < headers.length; i++) {
                         String header = headers[i].trim();
                         if (header.equalsIgnoreCase("Old Property Key")) {
@@ -40,17 +37,16 @@ public class PropertyMappingReader {
 
                     // Validate that we found both columns
                     if (oldPropertyKeyIndex == -1 || newPropertyKeyIndex == -1) {
-                        System.err.println("Error: CSV file must contain 'Old Property Key' and 'New Property Key' columns");
+                        Util.logError(
+                                "Error: CSV file must contain 'Old Property Key' and 'New Property Key' columns");
                         return mappings;
                     }
 
                     continue;
                 }
 
-                // Parse data line
                 String[] parts = splitCSVLine(line);
 
-                // Extract values from the identified columns
                 if (parts.length > Math.max(oldPropertyKeyIndex, newPropertyKeyIndex)) {
                     String oldKey = parts[oldPropertyKeyIndex].trim();
                     String newKey = parts[newPropertyKeyIndex].trim();
@@ -61,17 +57,13 @@ public class PropertyMappingReader {
                 }
             }
         } catch (IOException e) {
-            System.err.println("Error reading CSV file: " + csvFilePath + " - " + e.getMessage());
+            Util.logError("Error reading CSV file: " + csvFilePath + " - " + e.getMessage());
         }
 
         return mappings;
     }
 
-    /**
-     * Splits a CSV line handling basic tab-separated values
-     */
     private String[] splitCSVLine(String line) {
         return line.split(",");
     }
 }
-

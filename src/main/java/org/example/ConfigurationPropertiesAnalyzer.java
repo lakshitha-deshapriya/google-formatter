@@ -5,6 +5,7 @@ import com.github.javaparser.ParseResult;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.*;
 import com.github.javaparser.ast.expr.*;
+import com.github.javaparser.ast.nodeTypes.NodeWithName;
 import com.github.javaparser.printer.lexicalpreservation.LexicalPreservingPrinter;
 
 import java.io.*;
@@ -13,17 +14,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 
-/**
- * JavaParser-based analyzer for @ConfigurationProperties annotated classes.
- * Handles:
- * 1. Prefix changes from CSV mapping
- * 2. Attribute (field) changes
- * 3. Collection changes
- * 4. Changing accessors (getters/setters) of changed attributes throughout the project
- */
 public class ConfigurationPropertiesAnalyzer {
 
-    private JavaParser javaParser;
+    private final JavaParser javaParser;
 
     public ConfigurationPropertiesAnalyzer() {
         this.javaParser = new JavaParser();
@@ -131,16 +124,13 @@ public class ConfigurationPropertiesAnalyzer {
         }
     }
 
-    /**
-     * Analyzes a file for @ConfigurationProperties annotation and returns analysis result
-     */
     public AnalysisResult analyzeFile(String filePath, Map<String, String> mappings) {
         try {
             Path path = Paths.get(filePath);
             ParseResult<CompilationUnit> parseResult = javaParser.parse(path);
 
-            if (!parseResult.isSuccessful() || !parseResult.getResult().isPresent()) {
-                System.err.println("Failed to parse file: " + filePath);
+            if (!parseResult.isSuccessful() || parseResult.getResult().isEmpty()) {
+                Util.logError("Failed to parse file: " + filePath);
                 return null;
             }
 
@@ -153,22 +143,18 @@ public class ConfigurationPropertiesAnalyzer {
                 cls -> cls.getAnnotationByName("ConfigurationProperties").isPresent()
             );
 
-            if (!classWithAnnotation.isPresent()) {
-                // Check for method-level @ConfigurationProperties (e.g., @Bean methods)
+            if (classWithAnnotation.isEmpty()) {
                 return analyzeMethodLevelConfiguration(filePath, cu, mappings);
             }
 
             return analyzeClassLevelConfiguration(filePath, cu, classWithAnnotation.get(), mappings);
 
         } catch (IOException e) {
-            System.err.println("Error analyzing file: " + filePath + " - " + e.getMessage());
+            Util.logError("Error analyzing file: " + filePath + " - " + e.getMessage());
             return null;
         }
     }
 
-    /**
-     * Analyzes class-level @ConfigurationProperties annotation
-     */
     private AnalysisResult analyzeClassLevelConfiguration(
             String filePath,
             CompilationUnit cu,
@@ -179,7 +165,7 @@ public class ConfigurationPropertiesAnalyzer {
         String prefix = extractPrefixFromAnnotation(configAnnotation);
 
         if (prefix == null) {
-            System.err.println("Could not extract prefix from @ConfigurationProperties in: " + filePath);
+            Util.logError("Could not extract prefix from @ConfigurationProperties in: " + filePath);
             return null;
         }
 
@@ -188,18 +174,13 @@ public class ConfigurationPropertiesAnalyzer {
         result.compilationUnit = cu;
         result.classDeclaration = classDecl;
 
-        // Determine if prefix needs to change
         determineNewPrefix(result, mappings);
 
-        // Analyze fields
         analyzeFields(classDecl, result, mappings);
 
         return result;
     }
 
-    /**
-     * Analyzes method-level @ConfigurationProperties annotation (e.g., @Bean methods)
-     */
     private AnalysisResult analyzeMethodLevelConfiguration(
             String filePath,
             CompilationUnit cu,
@@ -210,7 +191,7 @@ public class ConfigurationPropertiesAnalyzer {
             method -> method.getAnnotationByName("ConfigurationProperties").isPresent()
         );
 
-        if (!methodWithAnnotation.isPresent()) {
+        if (methodWithAnnotation.isEmpty()) {
             return null;
         }
 
@@ -227,21 +208,17 @@ public class ConfigurationPropertiesAnalyzer {
         AnalysisResult result = new AnalysisResult(filePath, prefix, methodInfo, lineNumber);
         result.compilationUnit = cu;
 
-        // Determine if prefix needs to change
         determineNewPrefix(result, mappings);
 
         return result;
     }
 
-    /**
-     * Analyzes a nested configuration class (without @ConfigurationProperties)
-     */
     public AnalysisResult analyzeNestedConfigClass(String filePath, Map<String, String> mappings) {
         try {
             Path path = Paths.get(filePath);
             ParseResult<CompilationUnit> parseResult = javaParser.parse(path);
 
-            if (!parseResult.isSuccessful() || !parseResult.getResult().isPresent()) {
+            if (!parseResult.isSuccessful() || parseResult.getResult().isEmpty()) {
                 return null;
             }
 
@@ -249,7 +226,7 @@ public class ConfigurationPropertiesAnalyzer {
             LexicalPreservingPrinter.setup(cu);
 
             Optional<ClassOrInterfaceDeclaration> classDecl = cu.findFirst(ClassOrInterfaceDeclaration.class);
-            if (!classDecl.isPresent()) {
+            if (classDecl.isEmpty()) {
                 return null;
             }
 
@@ -267,20 +244,16 @@ public class ConfigurationPropertiesAnalyzer {
             result.compilationUnit = cu;
             result.classDeclaration = cls;
 
-            // Analyze fields for renaming
             analyzeNestedClassFields(cls, matchedPrefix, result, mappings);
 
             return result;
 
         } catch (IOException e) {
-            System.err.println("Error analyzing nested config class: " + filePath + " - " + e.getMessage());
+            Util.logError("Error analyzing nested config class: " + filePath + " - " + e.getMessage());
             return null;
         }
     }
 
-    /**
-     * Extracts prefix value from @ConfigurationProperties annotation
-     */
     private String extractPrefixFromAnnotation(AnnotationExpr annotation) {
         if (annotation instanceof NormalAnnotationExpr) {
             NormalAnnotationExpr normalAnnotation = (NormalAnnotationExpr) annotation;
@@ -302,9 +275,6 @@ public class ConfigurationPropertiesAnalyzer {
         return null;
     }
 
-    /**
-     * Determines if prefix needs to change based on mappings
-     */
     private void determineNewPrefix(AnalysisResult result, Map<String, String> mappings) {
         mappings.entrySet().stream()
             .filter(entry -> !entry.getKey().equalsIgnoreCase(entry.getValue()) &&
@@ -317,11 +287,7 @@ public class ConfigurationPropertiesAnalyzer {
             });
     }
 
-    /**
-     * Extracts new prefix from property mapping
-     */
     private String extractNewPrefix(String oldProperty, String newProperty, String oldPrefix) {
-        // Remove array indices before splitting to get clean parts
         String oldPropertyClean = oldProperty.replaceAll("\\[\\d+\\]", "");
         String newPropertyClean = newProperty.replaceAll("\\[\\d+\\]", "");
         String oldPrefixClean = oldPrefix.replaceAll("\\[\\d+\\]", "");
@@ -358,9 +324,6 @@ public class ConfigurationPropertiesAnalyzer {
         return newParts[0];
     }
 
-    /**
-     * Analyzes fields in a @ConfigurationProperties class
-     */
     private void analyzeFields(ClassOrInterfaceDeclaration classDecl, AnalysisResult result, Map<String, String> mappings) {
         List<FieldDeclaration> fields = classDecl.getFields();
 
@@ -396,9 +359,6 @@ public class ConfigurationPropertiesAnalyzer {
         }
     }
 
-    /**
-     * Analyzes fields in nested configuration class
-     */
     private void analyzeNestedClassFields(ClassOrInterfaceDeclaration classDecl, String matchedPrefix,
                                          AnalysisResult result, Map<String, String> mappings) {
         List<FieldDeclaration> fields = classDecl.getFields();
@@ -412,7 +372,6 @@ public class ConfigurationPropertiesAnalyzer {
                 FieldInfo fieldInfo = new FieldInfo(fieldName, fieldType, lineNumber);
                 fieldInfo.fieldDeclaration = field;
 
-                // Check mappings for indexed properties
                 for (Map.Entry<String, String> mapping : mappings.entrySet()) {
                     String oldKey = mapping.getKey();
                     String newKey = mapping.getValue();
@@ -438,9 +397,6 @@ public class ConfigurationPropertiesAnalyzer {
         }
     }
 
-    /**
-     * Checks for indexed property mappings (e.g., prefix.collection[0].field)
-     */
     private void checkIndexedPropertyMappings(FieldInfo fieldInfo, AnalysisResult result, Map<String, String> mappings) {
         String propertyName = fieldInfo.toPropertyName();
         String indexedPattern = result.prefix + "\\." + propertyName + "\\[\\d+\\]\\..*";
@@ -465,9 +421,6 @@ public class ConfigurationPropertiesAnalyzer {
         }
     }
 
-    /**
-     * Finds matching prefix for nested class based on class name
-     */
     private String findMatchingPrefixForNestedClass(String className, Map<String, String> mappings) {
         for (Map.Entry<String, String> mapping : mappings.entrySet()) {
             String oldKey = mapping.getKey();
@@ -491,9 +444,6 @@ public class ConfigurationPropertiesAnalyzer {
         return null;
     }
 
-    /**
-     * Extracts field name from indexed property (e.g., prefix[0].fieldName -> fieldName)
-     */
     private String extractFieldNameFromIndexedProperty(String propertyKey) {
         if (propertyKey == null) return null;
 
@@ -508,9 +458,6 @@ public class ConfigurationPropertiesAnalyzer {
         return null;
     }
 
-    /**
-     * Extracts collection field name from indexed property
-     */
     private String extractCollectionFieldFromIndexedProperty(String propertyKey, String prefix) {
         if (propertyKey == null || prefix == null) return null;
 
@@ -527,9 +474,6 @@ public class ConfigurationPropertiesAnalyzer {
         return null;
     }
 
-    /**
-     * Applies all changes to the analyzed file
-     */
     public void applyChanges(AnalysisResult analysis) {
         if (analysis == null || analysis.compilationUnit == null) {
             return;
@@ -555,14 +499,11 @@ public class ConfigurationPropertiesAnalyzer {
                 String modifiedCode = LexicalPreservingPrinter.print(analysis.compilationUnit);
                 Files.write(Paths.get(analysis.filePath), modifiedCode.getBytes());
             } catch (IOException e) {
-                System.err.println("Error writing changes to file: " + analysis.filePath + " - " + e.getMessage());
+                Util.logError("Error writing changes to file: " + analysis.filePath + " - " + e.getMessage());
             }
         }
     }
 
-    /**
-     * Updates the prefix in @ConfigurationProperties annotation
-     */
     private boolean updatePrefixAnnotation(AnalysisResult analysis) {
         if (analysis.classDeclaration != null) {
             Optional<AnnotationExpr> annotation = analysis.classDeclaration
@@ -602,17 +543,12 @@ public class ConfigurationPropertiesAnalyzer {
         return false;
     }
 
-    /**
-     * Renames a field and its accessors (getters/setters) in the class
-     */
     private boolean renameField(AnalysisResult analysis, FieldInfo fieldInfo) {
         if (fieldInfo.fieldDeclaration == null) {
             return false;
         }
 
         boolean modified = false;
-
-        // Rename the field declaration
         for (VariableDeclarator variable : fieldInfo.fieldDeclaration.getVariables()) {
             if (variable.getNameAsString().equals(fieldInfo.fieldName)) {
                 variable.setName(fieldInfo.newFieldName);
@@ -621,7 +557,6 @@ public class ConfigurationPropertiesAnalyzer {
             }
         }
 
-        // Find and rename getters and setters (and update field references inside them)
         if (analysis.classDeclaration != null) {
             modified = renameAccessorsInClass(analysis.classDeclaration, fieldInfo) || modified;
             modified = renameFieldReferencesInMethods(analysis.classDeclaration, fieldInfo) || modified;
@@ -630,9 +565,6 @@ public class ConfigurationPropertiesAnalyzer {
         return modified;
     }
 
-    /**
-     * Renames getters and setters for a renamed field within the class
-     */
     private boolean renameAccessorsInClass(ClassOrInterfaceDeclaration classDecl, FieldInfo fieldInfo) {
         boolean modified = false;
         String capitalizedOld = capitalize(fieldInfo.fieldName);
@@ -643,17 +575,14 @@ public class ConfigurationPropertiesAnalyzer {
         for (MethodDeclaration method : methods) {
             String methodName = method.getNameAsString();
 
-            // Rename getter
             if (methodName.equals("get" + capitalizedOld)) {
                 method.setName("get" + capitalizedNew);
                 modified = true;
             }
-            // Rename setter
             else if (methodName.equals("set" + capitalizedOld)) {
                 method.setName("set" + capitalizedNew);
                 modified = true;
             }
-            // Rename boolean getter
             else if (methodName.equals("is" + capitalizedOld) &&
                     (fieldInfo.fieldType.equals("boolean") || fieldInfo.fieldType.equals("Boolean"))) {
                 method.setName("is" + capitalizedNew);
@@ -664,16 +593,12 @@ public class ConfigurationPropertiesAnalyzer {
         return modified;
     }
 
-    /**
-     * Renames field references inside method bodies (including parameters in setters)
-     */
     private boolean renameFieldReferencesInMethods(ClassOrInterfaceDeclaration classDecl, FieldInfo fieldInfo) {
         boolean modified = false;
 
         List<MethodDeclaration> methods = classDecl.getMethods();
 
         for (MethodDeclaration method : methods) {
-            // Find all NameExpr (simple name references like 'fieldName' or 'this.fieldName')
             List<NameExpr> nameExprs = method.findAll(NameExpr.class);
 
             for (NameExpr nameExpr : nameExprs) {
@@ -683,7 +608,6 @@ public class ConfigurationPropertiesAnalyzer {
                 }
             }
 
-            // Also handle FieldAccessExpr (like 'this.fieldName')
             List<FieldAccessExpr> fieldAccesses = method.findAll(FieldAccessExpr.class);
 
             for (FieldAccessExpr fieldAccess : fieldAccesses) {
@@ -697,38 +621,12 @@ public class ConfigurationPropertiesAnalyzer {
         return modified;
     }
 
-    /**
-     * Updates getter/setter calls throughout a project for renamed fields
-     */
-    public List<String> updateAccessorCallsInProject(String projectPath, Map<String, String> fieldRenames) {
-        List<String> modifiedFiles = new ArrayList<>();
-
-        try {
-            Files.walk(Paths.get(projectPath))
-                .filter(path -> path.toString().endsWith(".java"))
-                .filter(path -> !path.toString().contains("/target/") &&
-                              !path.toString().contains("/build/"))
-                .forEach(path -> {
-                    if (updateAccessorCallsInFile(path.toString(), fieldRenames, new HashMap<>())) {
-                        modifiedFiles.add(path.toString());
-                    }
-                });
-        } catch (IOException e) {
-            System.err.println("Error walking project directory: " + e.getMessage());
-        }
-
-        return modifiedFiles;
-    }
-
-    /**
-     * Updates getter/setter calls in a single file
-     */
     public boolean updateAccessorCallsInFile(String filePath, Map<String, String> fieldRenames,
                                             Map<String, PropertyRenameRunner.ClassInfo> classInfoMap) {
         try {
             ParseResult<CompilationUnit> parseResult = javaParser.parse(Paths.get(filePath));
 
-            if (!parseResult.isSuccessful() || !parseResult.getResult().isPresent()) {
+            if (!parseResult.isSuccessful() || parseResult.getResult().isEmpty()) {
                 return false;
             }
 
@@ -736,34 +634,28 @@ public class ConfigurationPropertiesAnalyzer {
             LexicalPreservingPrinter.setup(cu);
             boolean modified = false;
 
-            // Extract the package of the current file
             String currentPackage = cu.getPackageDeclaration()
-                .map(pd -> pd.getNameAsString())
+                .map(NodeWithName::getNameAsString)
                 .orElse("");
 
-            // Extract all imports in the current file
             Set<String> imports = new HashSet<>();
             cu.getImports().forEach(importDecl -> {
                 String importPath = importDecl.getNameAsString();
                 imports.add(importPath);
-                // Also add just the class name for easier lookup
                 String className = importPath.substring(importPath.lastIndexOf('.') + 1);
                 imports.add(className);
             });
 
-            // Find all method call expressions
             List<MethodCallExpr> methodCalls = cu.findAll(MethodCallExpr.class);
 
             for (MethodCallExpr methodCall : methodCalls) {
                 String methodName = methodCall.getNameAsString();
 
-                // Skip static method calls (e.g., MembershipUtils.getAppId())
                 // Static methods are not generated from instance fields
                 if (isStaticMethodCall(methodCall)) {
                     continue;
                 }
 
-                // Check if this is a getter or setter call for a renamed field
                 for (Map.Entry<String, String> rename : fieldRenames.entrySet()) {
                     String[] parts = rename.getKey().split("\\.");
                     if (parts.length != 2) continue;
@@ -772,7 +664,6 @@ public class ConfigurationPropertiesAnalyzer {
                     String oldFieldName = parts[1];
                     String newFieldName = rename.getValue();
 
-                    // Check if we should update this accessor call
                     if (!shouldUpdateAccessor(className, classInfoMap, currentPackage, imports)) {
                         continue;
                     }
@@ -800,82 +691,56 @@ public class ConfigurationPropertiesAnalyzer {
             }
 
         } catch (IOException e) {
-            System.err.println("Error updating accessor calls in file: " + filePath + " - " + e.getMessage());
+            Util.logError("Error updating accessor calls in file: " + filePath + " - " + e.getMessage());
         }
 
         return false;
     }
 
-    /**
-     * Checks if a method call is a static method call.
-     * Static method calls are invoked on class names (e.g., MembershipUtils.getAppId())
-     * rather than on instance variables (e.g., config.getAppId())
-     */
     private boolean isStaticMethodCall(MethodCallExpr methodCall) {
         // Check if the method has a scope (the part before the dot)
-        if (!methodCall.getScope().isPresent()) {
-            return false; // No scope means it's a local method call
+        if (methodCall.getScope().isEmpty()) {
+            return false;
         }
 
         com.github.javaparser.ast.expr.Expression scope = methodCall.getScope().get();
 
-        // If the scope is a NameExpr, check if it starts with uppercase (likely a class name)
         if (scope instanceof com.github.javaparser.ast.expr.NameExpr) {
             String scopeName = ((com.github.javaparser.ast.expr.NameExpr) scope).getNameAsString();
-            // If the name starts with an uppercase letter, it's likely a class name (static call)
             if (!scopeName.isEmpty() && Character.isUpperCase(scopeName.charAt(0))) {
                 return true;
             }
         }
 
-        // If the scope is a FieldAccessExpr ending with 'class', it's a static call
-        // e.g., SomeClass.class.getMethod()
         if (scope instanceof com.github.javaparser.ast.expr.FieldAccessExpr) {
             com.github.javaparser.ast.expr.FieldAccessExpr fieldAccess =
                 (com.github.javaparser.ast.expr.FieldAccessExpr) scope;
-            if (fieldAccess.getNameAsString().equals("class")) {
-                return true;
-            }
+            return fieldAccess.getNameAsString().equals("class");
         }
 
         return false;
     }
 
-    /**
-     * Determines if we should update accessor calls for the given class.
-     * Returns true if:
-     * 1. The classInfoMap is empty (backward compatibility - update all)
-     * 2. The class is in the same package as the current file, OR
-     * 3. The class is explicitly imported in the current file, OR
-     * 4. A wildcard import covers the class's package
-     */
     private boolean shouldUpdateAccessor(String className, Map<String, PropertyRenameRunner.ClassInfo> classInfoMap,
                                         String currentPackage, Set<String> imports) {
-        // If classInfoMap is empty, use old behavior (update all) for backward compatibility
         if (classInfoMap == null || classInfoMap.isEmpty()) {
             return true;
         }
 
-        // Get the class info for the renamed class
         PropertyRenameRunner.ClassInfo classInfo = classInfoMap.get(className);
         if (classInfo == null) {
-            // If we don't have class info for this specific class, check if any import suggests it could be this class
-            // This handles cases where the class name might not match exactly or is from an external library
             for (String importStr : imports) {
                 if (importStr.endsWith("." + className) || importStr.equals(className)) {
                     return true;
                 }
             }
-            // If still not found, be conservative and don't update
             return false;
         }
 
-        // Check if the class is in the same package
         if (currentPackage.equals(classInfo.packageName)) {
             return true;
         }
 
-        // Check if the class is explicitly imported
         String fullClassName = classInfo.packageName.isEmpty()
             ? className
             : classInfo.packageName + "." + className;
@@ -884,7 +749,6 @@ public class ConfigurationPropertiesAnalyzer {
             return true;
         }
 
-        // Check for wildcard imports
         if (!classInfo.packageName.isEmpty()) {
             String wildcardImport = classInfo.packageName + ".*";
             for (String importStr : imports) {
@@ -897,9 +761,6 @@ public class ConfigurationPropertiesAnalyzer {
         return false;
     }
 
-    /**
-     * Capitalizes first letter of a string
-     */
     private String capitalize(String str) {
         if (str == null || str.isEmpty()) return str;
         return str.substring(0, 1).toUpperCase() + str.substring(1);
