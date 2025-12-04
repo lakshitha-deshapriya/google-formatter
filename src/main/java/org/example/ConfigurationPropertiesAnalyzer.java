@@ -671,6 +671,29 @@ public class ConfigurationPropertiesAnalyzer {
                     String capitalizedOld = capitalize(oldFieldName);
                     String capitalizedNew = capitalize(newFieldName);
 
+                    boolean isTargetAccessor = methodName.equals("get" + capitalizedOld) ||
+                                              methodName.equals("set" + capitalizedOld) ||
+                                              methodName.equals("is" + capitalizedOld);
+
+                    if (!isTargetAccessor) {
+                        continue;
+                    }
+
+                    // Verify this is actually an accessor pattern, not just a method with similar name
+                    if (!isValidAccessorCall(methodCall, methodName)) {
+                        continue;
+                    }
+
+                    // Exclude ThreadContextUtils.getCustomRequest() and CustomRequest class
+                    if (isExcludedMethodCall(methodCall)) {
+                        continue;
+                    }
+
+                    // Check if another class with the same accessor exists and the scope doesn't match expected class
+                    if (hasConflictingAccessor(methodCall, className, methodName, fieldRenames, classInfoMap, cu)) {
+                        continue;
+                    }
+
                     if (methodName.equals("get" + capitalizedOld)) {
                         methodCall.setName("get" + capitalizedNew);
                         modified = true;
@@ -721,6 +744,77 @@ public class ConfigurationPropertiesAnalyzer {
         return false;
     }
 
+    /**
+     * Checks if a method call is a valid accessor pattern.
+     * Accessors should be called on an object (with a scope) like obj.getField() or obj.setField(value).
+     * Methods without a scope like whitelist(arg) are not valid accessor calls.
+     */
+    private boolean isValidAccessorCall(MethodCallExpr methodCall, String methodName) {
+        // Valid accessor calls must have a scope (the object before the dot)
+        // e.g., adapter.getWhitelist() is valid, but whitelist(arg) is not
+        if (methodCall.getScope().isEmpty()) {
+            // No scope means it's a direct method call like whitelist(arg), not an accessor
+            return false;
+        }
+
+        // For getter methods (getXxx or isXxx), they should have no arguments
+        if (methodName.startsWith("get") || methodName.startsWith("is")) {
+            return methodCall.getArguments().isEmpty();
+        }
+
+        // For setter methods (setXxx), they should have exactly one argument
+        if (methodName.startsWith("set")) {
+            return methodCall.getArguments().size() == 1;
+        }
+
+        return false;
+    }
+
+    /**
+     * Checks if a method call should be excluded from renaming.
+     * Excludes ThreadContextUtils.getCustomRequest() and CustomRequest class accessors.
+     */
+    private boolean isExcludedMethodCall(MethodCallExpr methodCall) {
+        if (methodCall.getScope().isEmpty()) {
+            return false;
+        }
+
+        Expression scope = methodCall.getScope().get();
+
+        // Exclude ThreadContextUtils.getCustomRequest() calls
+        if (scope instanceof NameExpr) {
+            String scopeName = ((NameExpr) scope).getNameAsString();
+            if (scopeName.equals("ThreadContextUtils")) {
+                return true;
+            }
+        }
+
+        // Exclude chained calls on ThreadContextUtils.getCustomRequest()
+        if (scope instanceof MethodCallExpr) {
+            MethodCallExpr scopeMethodCall = (MethodCallExpr) scope;
+            if (scopeMethodCall.getNameAsString().equals("getCustomRequest")) {
+                if (scopeMethodCall.getScope().isPresent()) {
+                    Expression innerScope = scopeMethodCall.getScope().get();
+                    if (innerScope instanceof NameExpr &&
+                        ((NameExpr) innerScope).getNameAsString().equals("ThreadContextUtils")) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // Exclude CustomRequest class accessors
+        if (scope instanceof NameExpr) {
+            String varName = ((NameExpr) scope).getNameAsString();
+            // Check if variable name suggests it's a CustomRequest
+            String lowerVarName = varName.toLowerCase();
+            return lowerVarName.endsWith("customrequestcontext") ||
+                    (varName.equals("request") && lowerVarName.contains("custom"));
+        }
+
+        return false;
+    }
+
     private boolean shouldUpdateAccessor(String className, Map<String, PropertyRenameRunner.ClassInfo> classInfoMap,
                                         String currentPackage, Set<String> imports) {
         if (classInfoMap == null || classInfoMap.isEmpty()) {
@@ -759,6 +853,158 @@ public class ConfigurationPropertiesAnalyzer {
         }
 
         return false;
+    }
+
+    /**
+     * Checks if another class with the same accessor exists in the fieldRenames and the scope
+     * of the method call doesn't clearly match the expected class.
+     * This helps avoid incorrectly renaming accessors when multiple classes have the same method name.
+     */
+    private boolean hasConflictingAccessor(MethodCallExpr methodCall, String expectedClassName,
+                                           String methodName, Map<String, String> fieldRenames,
+                                           Map<String, PropertyRenameRunner.ClassInfo> classInfoMap,
+                                           CompilationUnit cu) {
+        // First, check if there are other classes with the same accessor method name
+        Set<String> classesWithSameAccessor = new HashSet<>();
+
+        for (String key : fieldRenames.keySet()) {
+            String[] parts = key.split("\\.");
+            if (parts.length != 2) continue;
+
+            String className = parts[0];
+            String fieldName = parts[1];
+            String capitalizedField = capitalize(fieldName);
+
+            // Check if this class also has an accessor matching the method name
+            if (methodName.equals("get" + capitalizedField) ||
+                methodName.equals("set" + capitalizedField) ||
+                methodName.equals("is" + capitalizedField)) {
+                classesWithSameAccessor.add(className);
+            }
+        }
+
+        // If only one class has this accessor, no conflict
+        if (classesWithSameAccessor.size() <= 1) {
+            return false;
+        }
+
+        // Multiple classes have the same accessor - need to check the scope
+        if (methodCall.getScope().isEmpty()) {
+            // No scope (calling on 'this') - check if we're inside the expected class
+            Optional<ClassOrInterfaceDeclaration> enclosingClass = methodCall.findAncestor(ClassOrInterfaceDeclaration.class);
+            if (enclosingClass.isPresent()) {
+                String enclosingClassName = enclosingClass.get().getNameAsString();
+                // If we're inside a different class that also has this accessor, skip this occurrence
+                if (!enclosingClassName.equals(expectedClassName) &&
+                    classesWithSameAccessor.contains(enclosingClassName)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        Expression scope = methodCall.getScope().get();
+        String scopeTypeName = inferScopeTypeName(scope, cu, classInfoMap);
+
+        // If we can determine the scope type and it's a different class that also has this accessor, skip
+        if (scopeTypeName != null && !scopeTypeName.equals(expectedClassName) &&
+            classesWithSameAccessor.contains(scopeTypeName)) {
+            return true;
+        }
+
+        // If we couldn't determine the type but the scope variable name suggests a different class
+        if (scopeTypeName == null && scope instanceof NameExpr) {
+            String varName = ((NameExpr) scope).getNameAsString();
+            // Check if the variable name suggests it's an instance of a different class with same accessor
+            for (String otherClass : classesWithSameAccessor) {
+                if (!otherClass.equals(expectedClassName)) {
+                    // Variable name often matches class name pattern (e.g., myConfig for MyConfig class)
+                    String lowerOtherClass = otherClass.toLowerCase();
+                    String lowerVarName = varName.toLowerCase();
+                    if (lowerVarName.contains(lowerOtherClass) || lowerOtherClass.contains(lowerVarName)) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Tries to infer the type name of a method call scope expression.
+     */
+    private String inferScopeTypeName(Expression scope, CompilationUnit cu,
+                                      Map<String, PropertyRenameRunner.ClassInfo> classInfoMap) {
+        if (scope instanceof NameExpr) {
+            String varName = ((NameExpr) scope).getNameAsString();
+
+            // Search for variable declaration in the compilation unit
+            List<VariableDeclarator> allVariables = cu.findAll(VariableDeclarator.class);
+            for (VariableDeclarator var : allVariables) {
+                if (var.getNameAsString().equals(varName)) {
+                    String typeName = var.getType().asString();
+                    // Remove generics if present
+                    int genericIdx = typeName.indexOf('<');
+                    if (genericIdx > 0) {
+                        typeName = typeName.substring(0, genericIdx);
+                    }
+                    return typeName;
+                }
+            }
+
+            // Check method parameters
+            List<com.github.javaparser.ast.body.Parameter> allParams = cu.findAll(com.github.javaparser.ast.body.Parameter.class);
+            for (com.github.javaparser.ast.body.Parameter param : allParams) {
+                if (param.getNameAsString().equals(varName)) {
+                    String typeName = param.getType().asString();
+                    int genericIdx = typeName.indexOf('<');
+                    if (genericIdx > 0) {
+                        typeName = typeName.substring(0, genericIdx);
+                    }
+                    return typeName;
+                }
+            }
+
+            // Check fields
+            List<FieldDeclaration> allFields = cu.findAll(FieldDeclaration.class);
+            for (FieldDeclaration field : allFields) {
+                for (VariableDeclarator fieldVar : field.getVariables()) {
+                    if (fieldVar.getNameAsString().equals(varName)) {
+                        String typeName = fieldVar.getType().asString();
+                        int genericIdx = typeName.indexOf('<');
+                        if (genericIdx > 0) {
+                            typeName = typeName.substring(0, genericIdx);
+                        }
+                        return typeName;
+                    }
+                }
+            }
+        } else if (scope instanceof MethodCallExpr) {
+            // For chained method calls, we could try to infer return type
+            // This is complex, so we return null and let the fallback logic handle it
+            return null;
+        } else if (scope instanceof FieldAccessExpr) {
+            // For field access like this.config, try to find the field type
+            FieldAccessExpr fieldAccess = (FieldAccessExpr) scope;
+            String fieldName = fieldAccess.getNameAsString();
+
+            List<FieldDeclaration> allFields = cu.findAll(FieldDeclaration.class);
+            for (FieldDeclaration field : allFields) {
+                for (VariableDeclarator fieldVar : field.getVariables()) {
+                    if (fieldVar.getNameAsString().equals(fieldName)) {
+                        String typeName = fieldVar.getType().asString();
+                        int genericIdx = typeName.indexOf('<');
+                        if (genericIdx > 0) {
+                            typeName = typeName.substring(0, genericIdx);
+                        }
+                        return typeName;
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     private String capitalize(String str) {

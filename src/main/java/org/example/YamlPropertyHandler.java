@@ -219,10 +219,8 @@ public class YamlPropertyHandler {
                 }
             }
 
-            // Apply mappings to the loaded YAML data
             boolean modified = applyMappingsToYamlData(yamlData, "", mappings);
 
-            // Write back if modified using SnakeYAML dumper
             if (modified) {
                 writeYamlFile(filePath, yamlData);
             }
@@ -241,40 +239,27 @@ public class YamlPropertyHandler {
             Map<String, Object> map, String prefix, Map<String, String> mappings) {
         boolean modified = false;
 
-        // We need to iterate over a copy of keys since we might be modifying the map
         List<String> keys = new ArrayList<>(map.keySet());
 
         for (String key : keys) {
             Object value = map.get(key);
             String fullPath = prefix.isEmpty() ? key : prefix + "." + key;
 
+            if (value instanceof Map) {
+                Map<String, Object> nestedMap = (Map<String, Object>) value;
+                boolean nestedFlattened =
+                        flattenNestedToTopLevel(map, key, fullPath, nestedMap, mappings, prefix);
+                if (nestedFlattened) {
+                    modified = true;
+                    continue;
+                }
+            }
+
             String newKeyPath = findNewKeyPathForPath(fullPath, key, mappings);
 
-            if (!key.equals(newKeyPath)) {
+            if (!key.equals(newKeyPath) && !newKeyPath.contains(".")) {
                 map.remove(key);
-
-                if (newKeyPath.contains(".")) {
-                    // Create nested structure
-                    String[] parts = newKeyPath.split("\\.");
-                    Map<String, Object> current = map;
-
-                    for (int i = 0; i < parts.length - 1; i++) {
-                        String part = parts[i];
-                        if (!current.containsKey(part)) {
-                            current.put(part, new LinkedHashMap<String, Object>());
-                        }
-                        Object next = current.get(part);
-                        if (next instanceof Map) {
-                            current = (Map<String, Object>) next;
-                        } else {
-                            // Cannot create nested structure, target already has a value
-                            break;
-                        }
-                    }
-                    current.put(parts[parts.length - 1], value);
-                } else {
-                    map.put(newKeyPath, value);
-                }
+                map.put(newKeyPath, value);
                 modified = true;
             }
 
@@ -292,6 +277,147 @@ public class YamlPropertyHandler {
         return modified;
     }
 
+    private boolean flattenNestedToTopLevel(
+            Map<String, Object> parentMap,
+            String key,
+            String fullPath,
+            Map<String, Object> nestedMap,
+            Map<String, String> mappings,
+            String prefix) {
+
+        // Find all leaf properties in this nested structure
+        List<String> leafPaths = new ArrayList<>();
+        List<Object> leafValues = new ArrayList<>();
+        collectLeafProperties(nestedMap, fullPath, leafPaths, leafValues);
+
+        boolean anyFlattened = false;
+        Set<String> pathsToRemove = new HashSet<>();
+
+        for (int i = 0; i < leafPaths.size(); i++) {
+            String leafPath = leafPaths.get(i);
+            Object leafValue = leafValues.get(i);
+
+            // Check if this leaf path has a mapping to a "flatter" structure
+            for (Map.Entry<String, String> mapping : mappings.entrySet()) {
+                String oldPath = mapping.getKey();
+                String newPath = mapping.getValue();
+
+                // Check if this leaf matches
+                if (!oldPath.equals(leafPath)
+                        && !normalizeArrayIndices(oldPath)
+                                .equals(normalizeArrayIndices(leafPath))) {
+                    continue;
+                }
+
+                int oldDepth = countDots(oldPath);
+                int newDepth = countDots(newPath);
+
+                if (newDepth >= oldDepth) {
+                    continue;
+                }
+
+                String oldRoot =
+                        oldPath.contains(".")
+                                ? oldPath.substring(0, oldPath.indexOf('.'))
+                                : oldPath;
+                String newRoot =
+                        newPath.contains(".")
+                                ? newPath.substring(0, newPath.indexOf('.'))
+                                : newPath;
+
+                if (!oldRoot.equals(newRoot) && newPath.contains(".")) {
+                    continue;
+                }
+
+                int prefixDepth = prefix.isEmpty() ? 0 : countDots(prefix) + 1;
+                int newAbsoluteDepth = countDots(newPath);
+
+                if (newAbsoluteDepth <= prefixDepth) {
+                    if (prefix.isEmpty() || !newPath.contains(".")) {
+                        parentMap.put(newPath, leafValue);
+                        pathsToRemove.add(leafPath);
+                        anyFlattened = true;
+                    }
+                }
+            }
+        }
+
+        if (anyFlattened) {
+            for (String pathToRemove : pathsToRemove) {
+                removeNestedPath(nestedMap, pathToRemove, fullPath);
+            }
+            if (nestedMap.isEmpty()) {
+                parentMap.remove(key);
+            }
+        }
+
+        return anyFlattened;
+    }
+
+    private void collectLeafProperties(
+            Map<String, Object> map, String prefix, List<String> paths, List<Object> values) {
+        for (Map.Entry<String, Object> entry : map.entrySet()) {
+            String fullPath = prefix + "." + entry.getKey();
+            Object value = entry.getValue();
+
+            if (value instanceof Map) {
+                collectLeafProperties((Map<String, Object>) value, fullPath, paths, values);
+            } else if (value instanceof List) {
+                // For lists, add each element as a leaf
+                List<?> list = (List<?>) value;
+                for (int i = 0; i < list.size(); i++) {
+                    Object element = list.get(i);
+                    if (element instanceof Map) {
+                        collectLeafProperties(
+                                (Map<String, Object>) element,
+                                fullPath + "[" + i + "]",
+                                paths,
+                                values);
+                    } else {
+                        paths.add(fullPath + "[" + i + "]");
+                        values.add(element);
+                    }
+                }
+            } else {
+                paths.add(fullPath);
+                values.add(value);
+            }
+        }
+    }
+
+    private void removeNestedPath(
+            Map<String, Object> map, String pathToRemove, String currentPath) {
+        // Remove the nested path from the map
+        for (Iterator<Map.Entry<String, Object>> it = map.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<String, Object> entry = it.next();
+            String fullPath = currentPath + "." + entry.getKey();
+
+            if (pathToRemove.equals(fullPath)) {
+                it.remove();
+                return;
+            }
+
+            if (pathToRemove.startsWith(fullPath + ".")
+                    || pathToRemove.startsWith(fullPath + "[")) {
+                Object value = entry.getValue();
+                if (value instanceof Map) {
+                    removeNestedPath((Map<String, Object>) value, pathToRemove, fullPath);
+                    if (((Map<?, ?>) value).isEmpty()) {
+                        it.remove();
+                    }
+                }
+            }
+        }
+    }
+
+    private int countDots(String path) {
+        int count = 0;
+        for (char c : path.toCharArray()) {
+            if (c == '.') count++;
+        }
+        return count;
+    }
+
     private String findNewKeyPathForPath(
             String fullPath, String currentKey, Map<String, String> mappings) {
         String normalizedFullPath = normalizeArrayIndices(fullPath);
@@ -303,27 +429,14 @@ public class YamlPropertyHandler {
             String newPath = mapping.getValue();
             String normalizedOldPath = normalizeArrayIndices(oldPath);
 
-            // The mapping must start with the current path or be the current path
-            if (!normalizedOldPath.startsWith(normalizedFullPath)
-                    && !normalizedOldPath.equals(normalizedFullPath)) {
-                continue;
-            }
-
-            // Additional check: if it starts with our path, it must be followed by . or [ or be
-            // exact
-            if (!normalizedOldPath.equals(normalizedFullPath)) {
-                String remainder = normalizedOldPath.substring(normalizedFullPath.length());
-                if (!remainder.isEmpty()
-                        && !remainder.startsWith(".")
-                        && !remainder.startsWith("[")) {
-                    continue;
-                }
-            }
-
             List<String> oldSegments = parsePathSegments(oldPath);
             List<String> newSegments = parsePathSegments(newPath);
 
-            if (currentDepth > oldSegments.size()) {
+            if (oldSegments.size() > currentDepth) {
+                continue;
+            }
+
+            if (!normalizedOldPath.equals(normalizedFullPath)) {
                 continue;
             }
 
