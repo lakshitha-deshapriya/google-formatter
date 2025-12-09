@@ -481,28 +481,16 @@ public class PropertyRenameRunner {
             }
         }
 
-        // Print cross-check summary for unchanged fields at the end
-        if (!unchangedFieldChanges.isEmpty() || !unchanged.isEmpty()) {
+        // Print cross-check summary for unchanged fields at the end (only for @ConfigurationProperties fields)
+        if (!unchangedFieldChanges.isEmpty()) {
             Util.log("\n" + separator);
-            Util.log("CROSS-CHECK: ALL UNCHANGED PROPERTY FIELDS");
+            Util.log("CROSS-CHECK: UNCHANGED CONFIGURATION PROPERTY FIELDS");
             Util.log(separator);
-            Util.log("The following properties had mappings but required no changes:");
+            Util.log("The following fields had mappings but required no changes:");
             Util.log("");
 
-            // List unchanged field changes
-            if (!unchangedFieldChanges.isEmpty()) {
-                Util.log("Unchanged Fields:");
-                for (PropertyRenamer.RenameResult result : unchangedFieldChanges) {
-                    Util.log("  - " + result.oldKey);
-                }
-            }
-
-            // List unchanged properties
-            if (!unchanged.isEmpty()) {
-                Util.log("\nUnchanged Properties:");
-                for (PropertyRenamer.RenameResult result : unchanged) {
-                    Util.log("  - " + result.oldKey);
-                }
+            for (PropertyRenamer.RenameResult result : unchangedFieldChanges) {
+                Util.log("  - " + result.oldKey);
             }
         }
 
