@@ -16,10 +16,30 @@ public class PropertyRenameRunner {
     }
 
     public void runPropertyRename(String[] args, boolean renameGetSet) {
-        String baseProjFolder;
-        if (args.length > 0) {
-            baseProjFolder = args[0];
-        } else {
+        // Parse command line arguments
+        // Usage: [--base-folder <path>] [--mapping-file <path>]
+        // Or positional: [baseFolderPath] [csvMappingPath]
+        String baseProjFolder = null;
+        String csvFilePath = null;
+
+        // Parse named arguments first
+        for (int i = 0; i < args.length; i++) {
+            if ("--base-folder".equals(args[i]) && i + 1 < args.length) {
+                baseProjFolder = args[++i];
+            } else if ("--mapping-file".equals(args[i]) && i + 1 < args.length) {
+                csvFilePath = args[++i];
+            } else if (!args[i].startsWith("--")) {
+                // Positional arguments for backward compatibility
+                if (baseProjFolder == null) {
+                    baseProjFolder = args[i];
+                } else if (csvFilePath == null) {
+                    csvFilePath = args[i];
+                }
+            }
+        }
+
+        // Use default base folder if not provided
+        if (baseProjFolder == null || baseProjFolder.isEmpty()) {
             baseProjFolder = "/Users/lakshithadeshapriya/Mine/Work/101Digital/Code/";
         }
 
@@ -36,14 +56,19 @@ public class PropertyRenameRunner {
             return;
         }
 
-        Util.logInline(
-                "CSV mapping file path (press Enter for default 'sample-property-mapping.csv'): ");
-        String csvFilePath = scanner.nextLine().trim();
+        // Only ask for CSV file path if not provided as argument
+        if (csvFilePath == null || csvFilePath.isEmpty()) {
+            Util.logInline(
+                    "CSV mapping file path (press Enter for default 'sample-property-mapping.csv'): ");
+            csvFilePath = scanner.nextLine().trim();
 
-        // Use default if no path provided
-        if (csvFilePath.isEmpty()) {
-            csvFilePath = "sample-property-mapping.csv";
-            Util.log("Using default CSV file: " + csvFilePath);
+            // Use default if no path provided
+            if (csvFilePath.isEmpty()) {
+                csvFilePath = "sample-property-mapping.csv";
+                Util.log("Using default CSV file: " + csvFilePath);
+            }
+        } else {
+            Util.log("Using CSV mapping file from argument: " + csvFilePath);
         }
 
         File csvFile = new File(csvFilePath);
