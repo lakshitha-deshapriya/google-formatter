@@ -303,11 +303,16 @@ public class PropertyRenameRunner {
     private void generateSummaryReport(
             List<PropertyRenamer.RenameResult> results, String separator) {
         List<PropertyRenamer.RenameResult> fieldChanges = new ArrayList<>();
+        List<PropertyRenamer.RenameResult> unchangedFieldChanges = new ArrayList<>();
         List<PropertyRenamer.RenameResult> propertyResults = new ArrayList<>();
 
         for (PropertyRenamer.RenameResult result : results) {
             if (isFieldChange(result)) {
-                fieldChanges.add(result);
+                if (isFieldActuallyUnchanged(result)) {
+                    unchangedFieldChanges.add(result);
+                } else {
+                    fieldChanges.add(result);
+                }
             } else {
                 propertyResults.add(result);
             }
@@ -339,8 +344,9 @@ public class PropertyRenameRunner {
         Util.log("  - Renamed: " + renamed.size());
         Util.log("  - Unchanged (mapping exists, same value): " + unchanged.size());
         Util.log("  - No mapping found: " + noMapping.size());
-        if (!fieldChanges.isEmpty()) {
+        if (!fieldChanges.isEmpty() || !unchangedFieldChanges.isEmpty()) {
             Util.log("\nTotal field changes: " + fieldChanges.size());
+            Util.log("  - Unchanged fields (mapping exists, same value): " + unchangedFieldChanges.size());
         }
         Util.log(separator);
 
@@ -428,6 +434,30 @@ public class PropertyRenameRunner {
             }
         }
 
+        // Print unchanged field changes
+        if (!unchangedFieldChanges.isEmpty()) {
+            Util.log("\n" + Util.repeatString("-", 80));
+            Util.log("UNCHANGED FIELDS (mapping exists, same value) (" + unchangedFieldChanges.size() + ")");
+            Util.log(Util.repeatString("-", 80));
+
+            Map<String, List<PropertyRenamer.RenameResult>> groupedByFile =
+                    groupByFile(unchangedFieldChanges);
+            for (Map.Entry<String, List<PropertyRenamer.RenameResult>> entry :
+                    groupedByFile.entrySet()) {
+                String[] fileParts = entry.getKey().split(File.separator);
+                String fileName = fileParts[fileParts.length - 1];
+                for (PropertyRenamer.RenameResult result : entry.getValue()) {
+                    Util.log(
+                            String.format(
+                                    "File: %-50s Line %4d: %s [%s]",
+                                    fileName,
+                                    Math.max(result.lineNumber, 0),
+                                    result.oldKey,
+                                    result.getPatternDescription()));
+                }
+            }
+        }
+
         // Print properties without mapping
         if (!noMapping.isEmpty()) {
             Util.log("\n" + Util.repeatString("-", 80));
@@ -451,6 +481,31 @@ public class PropertyRenameRunner {
             }
         }
 
+        // Print cross-check summary for unchanged fields at the end
+        if (!unchangedFieldChanges.isEmpty() || !unchanged.isEmpty()) {
+            Util.log("\n" + separator);
+            Util.log("CROSS-CHECK: ALL UNCHANGED PROPERTY FIELDS");
+            Util.log(separator);
+            Util.log("The following properties had mappings but required no changes:");
+            Util.log("");
+
+            // List unchanged field changes
+            if (!unchangedFieldChanges.isEmpty()) {
+                Util.log("Unchanged Fields:");
+                for (PropertyRenamer.RenameResult result : unchangedFieldChanges) {
+                    Util.log("  - " + result.oldKey);
+                }
+            }
+
+            // List unchanged properties
+            if (!unchanged.isEmpty()) {
+                Util.log("\nUnchanged Properties:");
+                for (PropertyRenamer.RenameResult result : unchanged) {
+                    Util.log("  - " + result.oldKey);
+                }
+            }
+        }
+
         Util.log("\n" + separator);
         Util.log("Property renaming completed!");
         Util.log(separator);
@@ -460,6 +515,65 @@ public class PropertyRenameRunner {
         return result.patternType == PropertyScanner.PatternType.CONFIGURATION_PROPERTIES_FIELD
                 || result.patternType == PropertyScanner.PatternType.NESTED_CONFIGURATION_FIELD
                 || result.patternType == PropertyScanner.PatternType.ACCESSOR_CALLS;
+    }
+
+    private boolean isFieldActuallyUnchanged(PropertyRenamer.RenameResult result) {
+        if (result.status == PropertyRenamer.RenameStatus.UNCHANGED) {
+            return true;
+        }
+
+        if (result.status == PropertyRenamer.RenameStatus.NO_MAPPING) {
+            return false;
+        }
+
+        if (result.oldKey == null || result.newKey == null) {
+            return false;
+        }
+
+        if (result.oldKey.equals(result.newKey)) {
+            return true;
+        }
+
+        String oldFieldName = extractFieldNameFromKey(result.oldKey);
+        String newFieldName = extractFieldNameFromKey(result.newKey);
+
+        if (oldFieldName != null && newFieldName != null) {
+            String oldCamelCase = toCamelCase(oldFieldName);
+            String newCamelCase = toCamelCase(newFieldName);
+            return oldCamelCase.equals(newCamelCase);
+        }
+
+        return false;
+    }
+
+    private String extractFieldNameFromKey(String key) {
+        if (key == null || key.isEmpty()) {
+            return null;
+        }
+        String cleaned = key.replaceAll("\\[\\d+\\]", "");
+        String[] parts = cleaned.split("\\.");
+        return parts.length > 0 ? parts[parts.length - 1] : key;
+    }
+
+    private String toCamelCase(String input) {
+        if (input == null || input.isEmpty()) {
+            return input;
+        }
+        StringBuilder result = new StringBuilder();
+        boolean capitalizeNext = false;
+
+        for (char c : input.toCharArray()) {
+            if (c == '-' || c == '_') {
+                capitalizeNext = true;
+            } else if (capitalizeNext) {
+                result.append(Character.toUpperCase(c));
+                capitalizeNext = false;
+            } else {
+                result.append(c);
+            }
+        }
+
+        return result.toString();
     }
 
     private Map<String, List<PropertyRenamer.RenameResult>> groupByFile(
