@@ -322,6 +322,11 @@ public class PropertyRenamer {
             return handleYamlFile(filePath, propertyMatches, mappings);
         }
 
+        String fileName = new File(filePath).getName().toLowerCase();
+        if (fileName.matches("message(_[a-z]{2})?\\.properties")) {
+            return results;
+        }
+
         try {
             File file = new File(filePath);
             List<String> lines = new ArrayList<>();
@@ -468,17 +473,11 @@ public class PropertyRenamer {
             String content, String originalKey, String extractedKey, String newKey) {
         String trimmedKey = originalKey.trim();
         if (trimmedKey.startsWith("${") && trimmedKey.endsWith("}")) {
-            if (trimmedKey.contains(":")) {
-                String regexPattern = "\\$\\{\\s*" + Pattern.quote(extractedKey) + "\\s*:";
-                String replacement = "\\${" + newKey + ":";
-
-                return content.replaceAll(regexPattern, replacement);
-            } else {
-                String regexPattern = "\\$\\{\\s*" + Pattern.quote(extractedKey) + "\\s*(?=\\})";
-                String replacement = "\\${" + newKey;
-
-                return content.replaceAll(regexPattern, replacement);
-            }
+            // Use a regex that matches the property key followed by either : (default value) or }
+            // This handles both ${property} and ${property:default} in the actual content
+            String regexPattern = "\\$\\{\\s*" + Pattern.quote(extractedKey) + "\\s*(?=[:}])";
+            String replacement = "\\${" + newKey;
+            return content.replaceAll(regexPattern, replacement);
         }
         return content;
     }
@@ -528,17 +527,11 @@ public class PropertyRenamer {
             String content, String originalKey, String extractedKey, String newKey) {
         String trimmedKey = originalKey.trim();
         if (trimmedKey.startsWith("${") && trimmedKey.endsWith("}")) {
-            if (trimmedKey.contains(":")) {
-                String regexPattern = "\\$\\{\\s*" + Pattern.quote(extractedKey) + "\\s*:";
-                String replacement = "\\${" + newKey + ":";
-
-                return content.replaceAll(regexPattern, replacement);
-            } else {
-                String regexPattern = "\\$\\{\\s*" + Pattern.quote(extractedKey) + "\\s*(?=\\})";
-                String replacement = "\\${" + newKey;
-
-                return content.replaceAll(regexPattern, replacement);
-            }
+            // Use a regex that matches the property key followed by either : (default value) or }
+            // This handles both ${property} and ${property:default} in the actual content
+            String regexPattern = "\\$\\{\\s*" + Pattern.quote(extractedKey) + "\\s*(?=[:}])";
+            String replacement = "\\${" + newKey;
+            return content.replaceAll(regexPattern, replacement);
         } else if (trimmedKey.contains(":")) {
             String regexPattern = "\\b" + Pattern.quote(extractedKey) + "\\s*:";
             String replacement = newKey + ":";

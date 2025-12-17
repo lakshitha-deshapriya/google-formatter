@@ -14,6 +14,8 @@ public class PropertyScanner {
     private static final List<Pattern> PROPERTY_PATTERNS = new ArrayList<>();
     private boolean silentMode = false;
 
+    private static final Pattern VALUE_PLACEHOLDER_PATTERN = Pattern.compile("\\$\\{([^}]+)}");
+
     static {
         // @Value annotation patterns - supports multi-line with flexible whitespace
         PROPERTY_PATTERNS.add(
@@ -110,13 +112,24 @@ public class PropertyScanner {
                     // Get the context (the actual line where match starts, trimmed)
                     String context = lines.get(lineNumber - 1).trim();
 
-                    PropertyMatch newMatch =
-                            new PropertyMatch(
-                                    filePath, lineNumber, propertyKey, context, patternType);
+                    // For @Value annotations, check if it contains complex strings with embedded placeholders
+                    if (patternType == PatternType.VALUE_ANNOTATION) {
+                        List<PropertyMatch> extractedMatches = extractPropertyPlaceholdersFromValue(
+                                filePath, lineNumber, propertyKey, context);
+                        for (PropertyMatch extracted : extractedMatches) {
+                            if (!isDuplicate(matches, extracted)) {
+                                matches.add(extracted);
+                            }
+                        }
+                    } else {
+                        PropertyMatch newMatch =
+                                new PropertyMatch(
+                                        filePath, lineNumber, propertyKey, context, patternType);
 
-                    // Check for duplicates before adding
-                    if (!isDuplicate(matches, newMatch)) {
-                        matches.add(newMatch);
+                        // Check for duplicates before adding
+                        if (!isDuplicate(matches, newMatch)) {
+                            matches.add(newMatch);
+                        }
                     }
                 }
             }
@@ -170,6 +183,34 @@ public class PropertyScanner {
         return PatternType.UNKNOWN;
     }
 
+    private List<PropertyMatch> extractPropertyPlaceholdersFromValue(
+            String filePath, int lineNumber, String valueContent, String context) {
+        List<PropertyMatch> matches = new ArrayList<>();
+
+        String trimmed = valueContent.trim();
+        if (trimmed.startsWith("${") && trimmed.endsWith("}") && !trimmed.substring(2).contains("${")) {
+            String inner = trimmed.substring(2, trimmed.length() - 1);
+            int colonIndex = inner.indexOf(':');
+            String propertyKey = colonIndex > 0 ? inner.substring(0, colonIndex).trim() : inner.trim();
+            matches.add(new PropertyMatch(filePath, lineNumber, "${" + propertyKey + "}", context, PatternType.VALUE_ANNOTATION));
+        } else {
+            Matcher placeholderMatcher = VALUE_PLACEHOLDER_PATTERN.matcher(valueContent);
+            while (placeholderMatcher.find()) {
+                String placeholder = placeholderMatcher.group(1).trim();
+                // Remove default value if present
+                int colonIndex = placeholder.indexOf(':');
+                String propertyKey = colonIndex > 0 ? placeholder.substring(0, colonIndex).trim() : placeholder;
+                PropertyMatch match = new PropertyMatch(
+                        filePath, lineNumber, "${" + propertyKey + "}", context, PatternType.VALUE_ANNOTATION);
+                if (!isDuplicate(matches, match)) {
+                    matches.add(match);
+                }
+            }
+        }
+
+        return matches;
+    }
+
     private int calculateLineNumber(String content, int position) {
         int lineNumber = 1;
         for (int i = 0; i < position && i < content.length(); i++) {
@@ -201,10 +242,15 @@ public class PropertyScanner {
                 for (PropertyMatch other : matches) {
                     if (other.patternType != PatternType.PROPERTY_PLACEHOLDER) {
                         boolean sameArea = Math.abs(other.lineNumber - match.lineNumber) <= 5;
+
+                        // Extract the base property key (without default value) from both
+                        String matchExtracted = extractPropertyKey(match.propertyKey);
+                        String otherExtracted = extractPropertyKey(other.propertyKey);
+
                         boolean propertyContained =
                                 other.propertyKey.contains(match.propertyKey)
-                                        || match.propertyKey.equals(
-                                                extractPropertyKey(other.propertyKey));
+                                        || match.propertyKey.equals(otherExtracted)
+                                        || matchExtracted.equals(otherExtracted);
 
                         if (sameArea && propertyContained) {
                             shouldAdd = false;
@@ -285,6 +331,10 @@ public class PropertyScanner {
                 return inner.substring(0, colonIndex);
             }
             return inner;
+        }
+        int colonIndex = fullProperty.indexOf(':');
+        if (colonIndex > 0) {
+            return fullProperty.substring(0, colonIndex);
         }
         return fullProperty;
     }
